@@ -14,14 +14,14 @@ bob_secret = randint(0, q)
 j = 30477252323177606811760882179058908038824640750610513771646768011063128035873508507547741559514324673960576895059570
 
 
-def bob_encrypt(h):
-    k = mod_exp(h, bob_secret, p)
+def encrypt_digest(h, secret, p):
+    k = mod_exp(h, secret, p)
     h = sha1("crazy flamboyant for the rap enjoyment".encode())
     h.update(str(k).encode())
     return h.digest()
 
 
-def find_element_of_order(r):
+def find_element_of_order(r, p):
     # find an element of order r mod p
     h = 1
     while h == 1:
@@ -32,7 +32,7 @@ def find_element_of_order(r):
     return h
 
 
-def brute_force_digest(digest, h, r):
+def brute_force_digest(digest, h, r, p):
     assert mod_exp(h, r, p) == 1, 'Element h should have had order r'
     # h has order r so the digest must have value h^x where 0 <= x < r - 1
     # Must include x = r (so K would be 1)
@@ -44,19 +44,19 @@ def brute_force_digest(digest, h, r):
         if digest == candidate_digest:
             return x
 
-    raise ValueError('Could not find h^x such that h^x = K mod p')
+    raise ValueError(f'Could not find h^x such that h^x = K mod p')
+
+
+def find_residues(j, p, secret):
+    for r in small_factors(j):
+        h = find_element_of_order(r, p)
+        # Simulates getting a message from Bob using the secret (h)
+        digest = encrypt_digest(h, secret, p)
+        b = brute_force_digest(digest, h, r, p)
+        yield (b, r)
 
 if __name__ == '__main__':
-    crt_moduli = []
-    running_total = 1
-    for r in small_factors(j):
-        h = find_element_of_order(r)
-        digest = bob_encrypt(h)
-        b = brute_force_digest(digest, h, r)
-        crt_moduli.append((b, r))
-        running_total *= r
-        if running_total > q:
-            break
-
-    assert bob_secret == crt_inductive(crt_moduli)
+    crt_moduli = list(find_residues(j, p, bob_secret))
+    x, _ = crt_inductive(crt_moduli)
+    assert bob_secret == x
     print(f'All done!  Successfully cracked bob_secret using {len(crt_moduli)} samples')

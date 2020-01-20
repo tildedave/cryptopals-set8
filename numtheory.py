@@ -17,7 +17,10 @@ def small_factors(j):
     return factors
 
 
-def mod_exp(m, n, p):
+def mod_exp(m: int, n: int, p: int):
+    """
+    Return m^n % p
+    """
     y = 1
     if n == 0:
         return y
@@ -69,4 +72,4 @@ def crt_inductive(residue_list: List[Tuple[int, int]]):
         m = m * m_
         x = x % m
 
-    return x
+    return x, m
