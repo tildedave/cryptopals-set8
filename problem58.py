@@ -88,9 +88,7 @@ if __name__ == '__main__':
     # y' = g^{m * r}
     # y' = (g^{r})^m
     g_ = mod_exp(g, r, p)
-    # NOTE(davek): I'm not certain how we're intended to get the value of this -
-    # the problem set seems to imply that we have y' available, which implies we can
-    # have y available.
+    # This is the Diffie-Hellman public key (and so public)
     y = mod_exp(g, bob_secret, p)
     g_inverse = mod_exp(g, p - 2, p)
     assert (g * g_inverse) % p == 1, 'g_inverse was not inverse of g'
