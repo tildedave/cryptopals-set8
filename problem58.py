@@ -1,6 +1,6 @@
 from numtheory import mod_exp, crt_inductive
 from random import randint
-from problem57 import find_residues
+from problem57 import find_residues, brute_force_digest, encrypt_digest
 
 p = 11470374874925275658116663507232161402086650258453896274534991676898999262641581519101074740642369848233294239851519212341844337347119899874391456329785623
 q = 335062023296420808191071248367701059461
@@ -75,10 +75,28 @@ assert mod_exp(g, 705485, p) == y1
 # print(kangaroo_attack(pseudorandom_map, N, g, 0, 2**40, y2))
 assert mod_exp(g, 359579674340, p) == y2
 
-bob_secret = randint(0, q)
-residues = list(find_residues(j, p, bob_secret))
-x, m = crt_inductive(residues)
+if __name__ == '__main__':
+    bob_secret = randint(0, q)
+    residues = list(find_residues(j, p, bob_secret))
+    n, r = crt_inductive(residues)
+    print(f'secret_key = {n} mod {r}')
+    assert bob_secret % r == n, 'Bob secret did not satisfy expected relationship'
 
-print(bob_secret)
-print(f'{x} = secret mod {m}')
-print((q - 1) // m)
+    # We know {secret key} = n mod r
+    # So {secret key} = n + m * r - must find m
+    # Through a series of algebraic transformations, we have:
+    # y' = g^{m * r}
+    # y' = (g^{r})^m
+    g_ = mod_exp(g, r, p)
+    # NOTE(davek): I'm not certain how we're intended to get the value of this -
+    # the problem set seems to imply that we have y' available, which implies we can
+    # have y available.
+    y = mod_exp(g, bob_secret, p)
+    g_inverse = mod_exp(g, p - 2, p)
+    assert (g * g_inverse) % p == 1, 'g_inverse was not inverse of g'
+
+    y_ = (y * mod_exp(g_inverse, n, p)) % p
+    m = kangaroo_attack(pseudorandom_map, N, g_, 0, (q - 1) // r, y_)
+
+    assert n + m * r == bob_secret
+    print(f'All done!  Successfully cracked bob_secret using {len(residues)} residues and kangaroo attack')
