@@ -38,6 +38,21 @@ def mod_exp(m: int, n: int, p: int):
     return y % p
 
 
+def mod_inverse(m: int, p: int):
+    # This works for p = 3 but maybe not p = 2
+    return mod_exp(m, p - 2, p)
+
+
+def mod_divide(m: int, n: int, p: int):
+    """
+    Return m / n mod p - probably won't work for p = 2
+    """
+    if n == 1:
+        return m
+
+    return (m * mod_inverse(n, p)) % p
+
+
 def euclid_extended(a: int, b: int):
     """
     Return (u, v, d) such that ua + vb = d and d = (a, b)
