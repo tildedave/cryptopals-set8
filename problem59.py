@@ -5,6 +5,7 @@ from elliptic_curve import (
     EllipticCurve,
     EllipticCurvePoint,
     add_point,
+    find_point_on_curve,
     invert_point,
     scalar_mult_point,
 )
@@ -62,6 +63,7 @@ if __name__ == "__main__":
 
     # Begin Subgroup Confinement Attack
     bad_curve1 = EllipticCurve(p, -95051, 210)
+    print(find_point_on_curve(bad_curve1))
     order_curve1 = 233970423115425145550826547352470124412
     # print(small_factors(order_curve1))
 

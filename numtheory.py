@@ -52,12 +52,15 @@ def mod_sqrt(a: int, p: int):
         q = q // 2
     assert q % 2 == 1, 'Reduced value was not odd'
 
+    # Step 1 - find generator
     while True:
         n = randint(2, p)
         # Dumb way to make sure this isn't a quadratic residue
         # (Could implement this better)
         if mod_exp(n, (p - 1) // 2, p) != 1:
             break
+
+    # Step 2 - initialize
     z = mod_exp(n, q, p)
     y = z
     r = e
@@ -65,6 +68,7 @@ def mod_sqrt(a: int, p: int):
     b = (a * x * x) % p
     x = (a * x) % p
     while True:
+        # Step 3 - Find exponent
         if b % p == 1:
             return x
 
@@ -72,7 +76,8 @@ def mod_sqrt(a: int, p: int):
         # if m = r output that a is a non-residue
         m = 1
         while mod_exp(b, 2 ** m, p) != 1:
-            continue
+            m += 1
+
         if m == r:
             raise ValueError(f'{a} was not a quadratic residue mod {p}')
 

@@ -1,9 +1,8 @@
+from random import randint
 from typing import Tuple, Union
-from numtheory import mod_divide
+from numtheory import mod_divide, mod_sqrt
 
 
-# "Point at infinity".
-O = (0, 1)
 EllipticCurvePoint = Tuple[int, int]
 
 
@@ -16,9 +15,10 @@ class EllipticCurve:
         self.prime = p
         self.a = a % p
         self.b = b % p
+        assert b % p != 1, '(0, 1) should not have been on curve'
 
     def __contains__(self, p1: EllipticCurvePoint):
-        if p1 == O:
+        if p1 == self.identity:
             return True
 
         x, y = p1
@@ -28,17 +28,27 @@ class EllipticCurve:
 
     @property
     def identity(self):
-        return O
+        """
+        This is a point at infinity.
+
+        (It's assumed that (0, 1) isn't on the given curve.)
+        """
+        return (0, 1)
 
 
-def invert_point(p1: EllipticCurvePoint, curve: EllipticCurve) -> EllipticCurvePoint:
+def invert_point(p1: EllipticCurvePoint,
+                 curve: EllipticCurve,
+                 ) -> EllipticCurvePoint:
     """
     Return the inverse of the given elliptic curve point
     """
     return (p1[0], curve.prime - p1[1])
 
 
-def add_point(p1: EllipticCurvePoint, p2: EllipticCurvePoint, curve: EllipticCurve) -> EllipticCurvePoint:
+def add_point(p1: EllipticCurvePoint,
+              p2: EllipticCurvePoint,
+              curve: EllipticCurve,
+              ) -> EllipticCurvePoint:
     if p1 == curve.identity:
         return p2
 
@@ -52,7 +62,7 @@ def add_point(p1: EllipticCurvePoint, p2: EllipticCurvePoint, curve: EllipticCur
     x1, y1 = p1
     x2, y2 = p2
     if p1 == p2:
-        m = mod_divide(3 * x1 * x1  + curve.a, 2 * y1, p)
+        m = mod_divide(3 * x1 * x1 + curve.a, 2 * y1, p)
     else:
         m = mod_divide(y2 - y1, x2 - x1, p)
 
@@ -81,3 +91,22 @@ def scalar_mult_point(p1: EllipticCurvePoint, n: int, curve: EllipticCurve):
         z = add_point(z, z, curve)
 
     return y
+
+
+def find_point_on_curve(curve: EllipticCurve):
+    iterations = 0
+    MAX_ITERATIONS = 5000
+    while iterations < MAX_ITERATIONS:
+        iterations += 1
+        # x could be a quadratic residue so we need to assume
+        x = randint(2, curve.prime)
+        try:
+            y_sq = (x * x * x + curve.a * x + curve.b) % curve.prime
+            y = mod_sqrt(y_sq, curve.prime)
+            assert (x, y) in curve, 'Chosen point should be on curve'
+            return (x, y)
+        except ValueError:
+            # this is acceptable
+            continue
+
+    raise ValueError('Unable to find point on curve')
