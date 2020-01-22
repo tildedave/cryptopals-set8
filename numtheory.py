@@ -1,4 +1,7 @@
+from random import randint
 from typing import Tuple, List
+
+import pytest
 
 
 def small_factors(j):
@@ -38,9 +41,65 @@ def mod_exp(m: int, n: int, p: int):
     return y % p
 
 
+def mod_sqrt(a: int, p: int):
+    """
+    Tonelli/Shanks Algorithm for modular square root
+    """
+    e = 0
+    q = p - 1
+    while q % 2 == 0:
+        e += 1
+        q = q // 2
+    assert q % 2 == 1, 'Reduced value was not odd'
+
+    while True:
+        n = randint(2, p)
+        # Dumb way to make sure this isn't a quadratic residue
+        # (Could implement this better)
+        if mod_exp(n, (p - 1) // 2, p) != 1:
+            break
+    z = mod_exp(n, q, p)
+    y = z
+    r = e
+    x = mod_exp(a, (q - 1) // 2, p)
+    b = (a * x * x) % p
+    x = (a * x) % p
+    while True:
+        if b % p == 1:
+            return x
+
+        # find smallest m such that b^2^m = 1 (p)
+        # if m = r output that a is a non-residue
+        m = 1
+        while mod_exp(b, 2 ** m, p) != 1:
+            continue
+        if m == r:
+            raise ValueError(f'{a} was not a quadratic residue mod {p}')
+
+        # Step 4 - reduce exponent
+        t = mod_exp(y, 2 ** (r - m - 1), p)
+        y = t * t % p
+        r = m
+        x = x * t % p
+        b = b * y % p
+
+
+def test_mod_sqrt():
+    assert mod_sqrt(4, 7) in [2, 5]
+    assert mod_sqrt(2, 7) in [3, 4]
+    assert mod_sqrt(58, 101) in [82, 19]
+    with pytest.raises(ValueError) as excinfo:
+        mod_sqrt(5, 7)
+    assert "not a quadratic residue" in str(excinfo.value)
+
+
 def mod_inverse(m: int, p: int):
     # This works for p = 3 but maybe not p = 2
     return mod_exp(m, p - 2, p)
+
+
+def test_mod_inverse():
+    assert mod_inverse(5, 7) == 3
 
 
 def mod_divide(m: int, n: int, p: int):
