@@ -1,15 +1,18 @@
 from random import randint
 from typing import Tuple
+from functools import reduce
+from operator import itemgetter, mul
 
 from elliptic_curve import (
     EllipticCurve,
     EllipticCurvePoint,
     add_point,
     find_point_on_curve,
+    find_point_order,
     invert_point,
     scalar_mult_point,
 )
-from numtheory import small_factors
+from numtheory import small_factors, crt_inductive
 
 p = 233970423115425145524320034830162017933
 curve = EllipticCurve(p, -95051, 11279326)
@@ -45,11 +48,49 @@ def generate_keypair() -> Tuple[int, EllipticCurvePoint]:
 
 
 def compute_secret(peer_public: EllipticCurvePoint,
-                   self_secret: int):
+                   self_secret: int) -> EllipticCurvePoint:
     """
     Compute the public key ^ secret.
     """
     return scalar_mult_point(peer_public, self_secret, curve)
+
+
+def find_point_of_order(r: int, curve_order: int, curve: EllipticCurve):
+    tries = 0
+    while tries < 10:
+        tries += 1
+        pt = find_point_on_curve(curve)
+        candidate_point = scalar_mult_point(pt, curve_order // r, curve)
+        if candidate_point != curve.identity:
+            assert scalar_mult_point(candidate_point, r, curve) == curve.identity
+            return candidate_point
+
+    raise ValueError(f'Unable to find point of order {r} on curve {curve}')
+
+
+def subgroup_confinement_residues(curve: EllipticCurve,
+                                  curve_order: int):
+    """
+    Return the residue of the secret key mod some value
+    """
+    for r in small_factors(curve_order):
+        if r == 2:
+            # Seem to have nothing but bugs for r = 2
+            continue
+
+        try:
+            bogus_point = find_point_of_order(r, curve_order, curve)
+            confused_response = compute_secret(bogus_point, bob_secret)
+            # brute for which r for confused response
+            current_point = bogus_point
+            for x in range(1, r):
+                if current_point == confused_response:
+                    yield (x, r)
+                    break
+                current_point = add_point(current_point, bogus_point, curve)
+        except ValueError as err:
+            continue
+
 
 
 if __name__ == "__main__":
@@ -63,14 +104,29 @@ if __name__ == "__main__":
 
     # Begin Subgroup Confinement Attack
     bad_curve1 = EllipticCurve(p, -95051, 210)
-    print(find_point_on_curve(bad_curve1))
     order_curve1 = 233970423115425145550826547352470124412
-    # print(small_factors(order_curve1))
-
     bad_curve2 = EllipticCurve(p, -95051, 504)
     order_curve2 = 233970423115425145544350131142039591210
-    # print(small_factors(order_curve2))
-
     bad_curve3 = EllipticCurve(p, -95051, 727)
     order_curve3 = 233970423115425145545378039958152057148
-    # print(small_factors(order_curve3))
+    bad_curves = [bad_curve1, bad_curve2, bad_curve3]
+    curve_orders = [order_curve1, order_curve2, order_curve3]
+
+    crt_residues = []
+    for bad_curve, bad_curve_order in zip(bad_curves, curve_orders):
+        print(f'Computing residues for {bad_curve}')
+        crt_residues += list(subgroup_confinement_residues(bad_curve,
+                                                           bad_curve_order))
+        # Must remove duplicates because the given bad curves might end up
+        # with the same residues.  In the event of a bug where we have
+        # different residue values mod the same prime the algorithm will
+        # still explode.
+        crt_residues = list(set(crt_residues))
+        q = reduce(mul, map(itemgetter(1), crt_residues), 1)
+        if q > given_order:
+            break
+
+    # Ready to attack
+    x, _ = crt_inductive(crt_residues)
+    assert x == bob_secret, 'Brute forced secret with bogus points'
+    print(f'All done!  Used {len(crt_residues)} residues to determine {x} == {bob_secret}')

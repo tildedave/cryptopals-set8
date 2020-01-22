@@ -35,6 +35,11 @@ class EllipticCurve:
         """
         return (0, 1)
 
+    def __str__(self):
+        return (
+            f'EllipticCurve y^2 = x^3 + {self.a}x + {self.b} '
+            f'mod {self.prime}'
+        )
 
 def invert_point(p1: EllipticCurvePoint,
                  curve: EllipticCurve,
@@ -104,9 +109,22 @@ def find_point_on_curve(curve: EllipticCurve):
             y_sq = (x * x * x + curve.a * x + curve.b) % curve.prime
             y = mod_sqrt(y_sq, curve.prime)
             assert (x, y) in curve, 'Chosen point should be on curve'
+
             return (x, y)
         except ValueError:
             # this is acceptable
             continue
 
     raise ValueError('Unable to find point on curve')
+
+
+def find_point_order(pt: EllipticCurvePoint, curve: EllipticCurve):
+    """
+    Debugging method to find the order of a given point.  Uses repeated adding
+    """
+    order = 1
+    while pt != curve.identity:
+        pt = add_point(pt, pt, curve)
+        order += 1
+
+    return order
