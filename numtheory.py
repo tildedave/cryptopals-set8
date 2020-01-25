@@ -20,27 +20,6 @@ def small_factors(j):
     return factors
 
 
-def mod_exp(m: int, n: int, p: int):
-    """
-    Return m^n % p
-    """
-    y = 1
-    if n == 0:
-        return y
-
-    if n < 0:
-        raise ValueError('Not implemented yet')
-
-    z = m
-    while n > 0:
-        if n % 2 == 1:
-            y = (z * y) % p
-        n = n // 2
-        z = (z * z) % p
-
-    return y % p
-
-
 def mod_sqrt(a: int, p: int):
     """
     Tonelli/Shanks Algorithm for modular square root
@@ -57,14 +36,14 @@ def mod_sqrt(a: int, p: int):
         n = randint(2, p)
         # Dumb way to make sure this isn't a quadratic residue
         # (Could implement this better)
-        if mod_exp(n, (p - 1) // 2, p) != 1:
+        if pow(n, (p - 1) // 2, p) != 1:
             break
 
     # Step 2 - initialize
-    z = mod_exp(n, q, p)
+    z = pow(n, q, p)
     y = z
     r = e
-    x = mod_exp(a, (q - 1) // 2, p)
+    x = pow(a, (q - 1) // 2, p)
     b = (a * x * x) % p
     x = (a * x) % p
     while True:
@@ -75,14 +54,14 @@ def mod_sqrt(a: int, p: int):
         # find smallest m such that b^2^m = 1 (p)
         # if m = r output that a is a non-residue
         m = 1
-        while mod_exp(b, 2 ** m, p) != 1:
+        while pow(b, 2 ** m, p) != 1:
             m += 1
 
         if m == r:
             raise ValueError(f'{a} was not a quadratic residue mod {p}')
 
         # Step 4 - reduce exponent
-        t = mod_exp(y, 2 ** (r - m - 1), p)
+        t = pow(y, 2 ** (r - m - 1), p)
         y = t * t % p
         r = m
         x = x * t % p
@@ -100,7 +79,7 @@ def test_mod_sqrt():
 
 def mod_inverse(m: int, p: int):
     # This works for p = 3 but maybe not p = 2
-    return mod_exp(m, p - 2, p)
+    return pow(m, p - 2, p)
 
 
 def test_mod_inverse():

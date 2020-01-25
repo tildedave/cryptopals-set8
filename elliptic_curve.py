@@ -41,6 +41,7 @@ class EllipticCurve:
             f'mod {self.prime}'
         )
 
+
 def invert_point(p1: EllipticCurvePoint,
                  curve: EllipticCurve,
                  ) -> EllipticCurvePoint:

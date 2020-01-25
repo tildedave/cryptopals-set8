@@ -1,4 +1,4 @@
-from numtheory import mod_exp, crt_inductive
+from numtheory import crt_inductive
 from random import randint
 from problem57 import find_residues, brute_force_digest, encrypt_digest
 
@@ -29,18 +29,18 @@ print('N', N)
 def tame_kangaroo(f, N, g, a, b, y, precomputed_powers):
     # "Tame Kangaroo"
     xT = 0
-    yT = mod_exp(g, b, p)
+    yT = pow(g, b, p)
     for _ in range(0, N):
         xT += f(yT)
         yT = (yT * precomputed_powers[f(yT)]) % p
 
-    assert yT == mod_exp(g, b + xT, p), 'Tame kangaroo did not have expected value'
+    assert yT == pow(g, b + xT, p), 'Tame kangaroo did not have expected value'
 
     return xT, yT
 
 def kangaroo_attack(f, N, g, a, b, y):
     # first build a table of g^f(yW) since there's only a finite number of these
-    precomputed_powers = {f(x): mod_exp(g, f(x), p) for x in range(0, k)}
+    precomputed_powers = {f(x): pow(g, f(x), p) for x in range(0, k)}
 
     # f is a psuedorandom mapping function
     # g is a generator of the cyclic group
@@ -61,7 +61,7 @@ def kangaroo_attack(f, N, g, a, b, y):
 
         if yW == yT:
             # Boom
-            assert mod_exp(g, b + xT - xW, p) == y, 'Discrete logarithm was not solved'
+            assert pow(g, b + xT - xW, p) == y, 'Discrete logarithm was not solved'
             print(f'Finished in {iterations} iterations')
             return b + xT - xW
 
@@ -70,10 +70,10 @@ def kangaroo_attack(f, N, g, a, b, y):
 
 # g^705485 = y1
 # print(kangaroo_attack(pseudorandom_map, N, g, 0, 2**20, y1))
-assert mod_exp(g, 705485, p) == y1
+assert pow(g, 705485, p) == y1
 # g^359579674340 = y2
 # print(kangaroo_attack(pseudorandom_map, N, g, 0, 2**40, y2))
-assert mod_exp(g, 359579674340, p) == y2
+assert pow(g, 359579674340, p) == y2
 
 if __name__ == '__main__':
     bob_secret = randint(0, q)
@@ -87,13 +87,13 @@ if __name__ == '__main__':
     # Through a series of algebraic transformations, we have:
     # y' = g^{m * r}
     # y' = (g^{r})^m
-    g_ = mod_exp(g, r, p)
+    g_ = pow(g, r, p)
     # This is the Diffie-Hellman public key (and so public)
-    y = mod_exp(g, bob_secret, p)
-    g_inverse = mod_exp(g, p - 2, p)
+    y = pow(g, bob_secret, p)
+    g_inverse = pow(g, p - 2, p)
     assert (g * g_inverse) % p == 1, 'g_inverse was not inverse of g'
 
-    y_ = (y * mod_exp(g_inverse, n, p)) % p
+    y_ = (y * pow(g_inverse, n, p)) % p
     m = kangaroo_attack(pseudorandom_map, N, g_, 0, (q - 1) // r, y_)
 
     assert n + m * r == bob_secret
