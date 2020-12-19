@@ -131,3 +131,71 @@ def crt_inductive(residue_list: List[Tuple[int, int]]):
         x = x % m
 
     return x, m
+
+
+def kronecker_symbol(a: int, b: int):
+    tab2 = [0, 1, 0, -1, 0, -1, 0, 1] # (-1)^((n^2 - 1) / 8)
+    # Step 1
+    if b == 0:
+        if a != 1:
+            return 0
+        return 1
+
+    # Step 2
+    # if a and b are both even, output 0 and terminate
+    if a % 2 == b % 2 == 0:
+        return 0
+
+    v = 0
+    while b % 2 == 0:
+        v += 1
+        b = b // 2
+
+    if v % 2 == 0:
+        k = 1
+    else:
+        k = tab2[a & 7]  # (-1)^((a^2 - 1)/8)
+
+    if b < 0:
+        b = -b
+        if a < 0:
+            k = -k
+
+    # Step 3
+    while True:
+        assert b % 2 == 1, 'b should be odd'
+        assert b > 0, 'b > 3'
+
+        if a == 0:
+            if b > 1:
+                return 0
+            if b == 1:
+                return k
+
+        v = 0
+        while a % 2 == 0:
+            v += 1
+            a = a // 2
+
+        if v % 2 == 1:
+            k = tab2[b & 7]  # (-1)^((a^2 - 1)/8)
+
+        # Step 4
+        if a & b & 2:
+            k = -k
+
+        r = abs(a)
+        a = b % r
+        b = r
+
+
+def test_kronecker_symbol():
+    assert -1 == kronecker_symbol(-1, 7)
+    assert 1 == kronecker_symbol(-1, 13)
+    assert -1 == kronecker_symbol(2, 3)
+    assert -1 == kronecker_symbol(2, 5)
+    assert -1 == kronecker_symbol(2, 11)
+    assert -1 == kronecker_symbol(2, 13)
+    assert 1 == kronecker_symbol(2, 7)
+    assert 1 == kronecker_symbol(2, 17)
+    assert 1 == kronecker_symbol(2, 23)
