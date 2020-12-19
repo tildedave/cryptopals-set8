@@ -1,7 +1,7 @@
 from typing import Tuple, Union
 from random import randint
 
-from numtheory import mod_divide, mod_sqrt
+from numtheory import kronecker_symbol, mod_divide, mod_sqrt
 
 
 EllipticCurvePoint = Tuple[int, int]
@@ -186,7 +186,32 @@ def montgomery_ladder(curve: MontgomeryCurve, u: int, k: int):
         u2, u3 = cswap(u2, u3, b)
         w2, w3 = cswap(w2, w3, b)
 
-    return (u2 * (w2 ** (p-2))) % p
+    return (u2 * pow(w2, p-2, p)) % p
+
+
+def montgomery_point_inverse(curve: MontgomeryCurve, u: int) -> Tuple[int, int]:
+    p = curve.prime
+    a = curve.a
+    b = curve.b
+
+    rhs = (u ** 3 + a * (u ** 2) + u) % p
+    v = mod_sqrt(mod_divide(rhs, b, p), p)
+
+    if p - v < v:
+        return (p - v, v)
+
+    return (v, p - v)
+
+
+def montgomery_point_test(curve: MontgomeryCurve, u: int) -> bool:
+    p = curve.prime
+    a = curve.a
+    b = curve.b
+
+    rhs = (u ** 3 + a * (u ** 2) + u) % p
+    v = mod_divide(rhs, b, p)
+
+    return kronecker_symbol(v, p) == 1
 
 
 def test_cswap():
