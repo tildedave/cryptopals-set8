@@ -2,8 +2,9 @@ from random import randint
 
 import pytest
 
-from numtheory import kronecker_symbol, mod_divide, mod_sqrt, small_factors
+from numtheory import mod_sqrt, small_factors
 from elliptic_curve import (
+    EllipticCurvePoint,
     MontgomeryCurve,
     montgomery_ladder,
     montgomery_point_inverse, montgomery_point_test,

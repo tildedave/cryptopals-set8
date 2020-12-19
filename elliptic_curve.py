@@ -10,6 +10,8 @@ EllipticCurvePoint = Tuple[int, int]
 This is a point at infinity.
 
 (It's assumed that (0, 1) isn't on the given curve.)
+
+TODO - this is Weierstrass only
 """
 EllipticCurveIdentity: EllipticCurvePoint = (0, 1)
 
@@ -21,8 +23,33 @@ class EllipticCurve:
     def __contains__(self, p1: EllipticCurvePoint):
         raise NotImplementedError
 
-    def scalar_mult(self, p1: EllipticCurvePoint, n: int):
+    def scalar_mult(self,
+                    p1: EllipticCurvePoint,
+                    n: int) -> EllipticCurvePoint:
         raise NotImplementedError
+
+    def find_point_on_curve(self) -> EllipticCurvePoint:
+        raise NotImplementedError
+
+    def is_identity(self, point: EllipticCurvePoint) -> bool:
+        raise NotImplementedError
+
+    def find_point_of_order(self,
+                            r: int,
+                            curve_order: int,
+                            ) -> EllipticCurvePoint:
+        for _ in range(0, 10):
+            pt = self.find_point_on_curve()
+            assert pt in self, 'find_point_on_curve returned invalid value'
+
+            candidate_point = self.scalar_mult(pt, curve_order // r)
+            if not self.is_identity(candidate_point):
+                continue
+
+            if self.is_identity(self.scalar_mult(candidate_point, r)):
+                return candidate_point
+
+        raise ValueError(f'Unable to find point of order {r} on curve {self}')
 
 
 class WeierstrassCurve(EllipticCurve):
@@ -51,7 +78,9 @@ class WeierstrassCurve(EllipticCurve):
             f'mod {self.prime}'
         )
 
-    def scalar_mult(self, p1: EllipticCurvePoint, n: int):
+    def scalar_mult(self,
+                    p1: EllipticCurvePoint,
+                    n: int) -> EllipticCurvePoint:
         """
         Return a point added to itself n times
         """
@@ -70,6 +99,26 @@ class WeierstrassCurve(EllipticCurve):
             z = add_point(z, z, self)
 
         return y
+
+    def find_point_on_curve(self) -> EllipticCurvePoint:
+        MAX_ITERATIONS = 5000
+        for _ in range(0, MAX_ITERATIONS):
+            # x could be a quadratic residue so we need to assume
+            x = randint(2, self.prime)
+            try:
+                y_sq = (x * x * x + self.a * x + self.b) % self.prime
+                y = mod_sqrt(y_sq, self.prime)
+                assert (x, y) in self, 'Chosen point should be on curve'
+
+                return (x, y)
+            except ValueError:
+                # this is acceptable
+                continue
+
+        raise ValueError('Unable to find point on curve')
+
+    def is_identity(self, point: EllipticCurvePoint) -> bool:
+        return point is EllipticCurveIdentity
 
 
 def invert_point(p1: EllipticCurvePoint,
@@ -108,26 +157,6 @@ def add_point(p1: EllipticCurvePoint,
     return (x3, y3)
 
 
-def find_point_on_curve(curve: WeierstrassCurve):
-    iterations = 0
-    MAX_ITERATIONS = 5000
-    while iterations < MAX_ITERATIONS:
-        iterations += 1
-        # x could be a quadratic residue so we need to assume
-        x = randint(2, curve.prime)
-        try:
-            y_sq = (x * x * x + curve.a * x + curve.b) % curve.prime
-            y = mod_sqrt(y_sq, curve.prime)
-            assert (x, y) in curve, 'Chosen point should be on curve'
-
-            return (x, y)
-        except ValueError:
-            # this is acceptable
-            continue
-
-    raise ValueError('Unable to find point on curve')
-
-
 def find_point_order(pt: EllipticCurvePoint, curve: WeierstrassCurve):
     """
     Debugging method to find the order of a given point.  Uses repeated adding
@@ -163,12 +192,34 @@ class MontgomeryCurve(EllipticCurve):
 
         return (self.b * v * v) % p == (u * u * u + self.a * u * u + u) % p
 
+    def scalar_mult(self,
+                    p1: EllipticCurvePoint,
+                    k: int) -> EllipticCurvePoint:
+        u_ = montgomery_ladder(self, p1[0], k)
+        # (u, v) and (u, -v) are both valid
+        return (u_, montgomery_point_inverse(self, u_)[0])
+
+    def find_point_on_curve(self) -> EllipticCurvePoint:
+        MAX_ITERATIONS = 5000
+        for _ in range(0, MAX_ITERATIONS):
+            u = randint(2, self.prime)
+            if not montgomery_point_test(self, u):
+                continue
+
+            return (u, montgomery_point_inverse(self, u)[0])
+
+        raise ValueError('Unable to find point on curve')
+
+    def is_identity(self, point: EllipticCurvePoint) -> bool:
+        # Not exactly correct
+        return point[0] == 0 and point[1] == 0
+
 
 def mod_point(pt: EllipticCurvePoint, p: int) -> EllipticCurvePoint:
     return (pt[0] % p, pt[1] % p)
 
 
-def montgomery_ladder(curve: MontgomeryCurve, u: int, k: int):
+def montgomery_ladder(curve: MontgomeryCurve, u: int, k: int) -> int:
     # Implement ladder
     p = curve.prime
     a = curve.a
@@ -189,12 +240,17 @@ def montgomery_ladder(curve: MontgomeryCurve, u: int, k: int):
     return (u2 * pow(w2, p-2, p)) % p
 
 
-def montgomery_point_inverse(curve: MontgomeryCurve, u: int) -> Tuple[int, int]:
+def montgomery_point_inverse(curve: MontgomeryCurve,
+                             u: int,
+                             ) -> Tuple[int, int]:
     p = curve.prime
     a = curve.a
     b = curve.b
 
     rhs = (u ** 3 + a * (u ** 2) + u) % p
+    if rhs == 0:
+        return (0, 0)
+
     v = mod_sqrt(mod_divide(rhs, b, p), p)
 
     if p - v < v:
@@ -237,7 +293,6 @@ def test_montgomery_contains():
 
 
 def test_montgomery_ladder():
-
     p = 233970423115425145524320034830162017933
     curve = MontgomeryCurve(p, 534, 1)
     given_order = 29246302889428143187362802287225875743
@@ -245,3 +300,13 @@ def test_montgomery_ladder():
     assert montgomery_ladder(curve, 4, given_order) == 0
     # Should not happen
     assert montgomery_ladder(curve, 76600469441198017145391791613091732004, 11) == 0
+
+
+def test_montgomery_find_point_on_curve():
+    p = 233970423115425145524320034830162017933
+    given_order = 233970423115425145498902418297807005944
+    curve = MontgomeryCurve(p, 534, 1)
+    point = curve.find_point_of_order(4, given_order)
+
+    assert curve.scalar_mult(point, 4) == (0, 0)
+
