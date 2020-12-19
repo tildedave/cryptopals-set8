@@ -140,6 +140,11 @@ def find_point_order(pt: EllipticCurvePoint, curve: WeierstrassCurve):
     return order
 
 
+def cswap(n1, n2, z):
+    d = int(z != 0)
+    return (n1 * (1 - d) + n2 * d, n2 * (1 - d) + n1 * d)
+
+
 class MontgomeryCurve(EllipticCurve):
     """
     Curve defined by B*v^2 = u^3 + A*u^2 + u
@@ -158,17 +163,60 @@ class MontgomeryCurve(EllipticCurve):
 
         return (self.b * v * v) % p == (u * u * u + self.a * u * u + u) % p
 
-    def scalar_mult(self, p1: EllipticCurvePoint, n: int):
-        # Implement ladder
-        u, v = p1[0], p1[1]
-        p = self.prime
 
-        u2, w2 = (1, 0)
-        u3, w3 = (u, 1)
+def mod_point(pt: EllipticCurvePoint, p: int) -> EllipticCurvePoint:
+    return (pt[0] % p, pt[1] % p)
 
+
+def montgomery_ladder(curve: MontgomeryCurve, u: int, k: int):
+    # Implement ladder
+    p = curve.prime
+    a = curve.a
+
+    u2, w2 = (1, 0)
+    u3, w3 = (u, 1)
+
+    for i in reversed(range(0, p.bit_length())):
+        b = 1 & (k >> i)
+        u2, u3 = cswap(u2, u3, b)
+        w2, w3 = cswap(w2, w3, b)
+        u3, w3 = mod_point(((u2*u3 - w2*w3) ** 2, u * (u2*w3 - w2*u3) ** 2), p)
+        u2, w2 = mod_point(((u2 ** 2 - w2 ** 2) ** 2,
+                            4*u2*w2 * (u2 ** 2 + a * u2 * w2 + w2 ** 2)), p)
+        u2, u3 = cswap(u2, u3, b)
+        w2, w3 = cswap(w2, w3, b)
+
+    return (u2 * (w2 ** (p-2))) % p
+
+
+def test_cswap():
+    assert (4, 5) == cswap(4, 5, 0)
+    assert (5, 4) == cswap(4, 5, 3)
+
+
+def test_weierstrass_contains():
+    p = 233970423115425145524320034830162017933
+    curve = WeierstrassCurve(p, -95051, 11279326)
+    point = (182, 85518893674295321206118380980485522083)
+    assert point in curve, 'Point was not on curve (somehow)'
+
+    given_order = 29246302889428143187362802287225875743
+    pt = curve.scalar_mult(point, given_order)
+    assert pt == EllipticCurveIdentity, 'Point did not have expected order'
 
 
 def test_montgomery_contains():
     p = 233970423115425145524320034830162017933
     curve = MontgomeryCurve(p, 534, 1)
     assert (4, 85518893674295321206118380980485522083) in curve
+
+
+def test_montgomery_ladder():
+
+    p = 233970423115425145524320034830162017933
+    curve = MontgomeryCurve(p, 534, 1)
+    given_order = 29246302889428143187362802287225875743
+
+    assert montgomery_ladder(curve, 4, given_order) == 0
+    # Should not happen
+    assert montgomery_ladder(curve, 76600469441198017145391791613091732004, 11) == 0
