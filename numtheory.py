@@ -4,15 +4,15 @@ from typing import Tuple, List
 import pytest
 
 
-def small_factors(j):
+def small_factors(j, max_factor=2**16):
     """
     Return all factors of a passed in integer < 2 ** 16
     """
     factors = []
-    for i in range(2, 2**16):
+    for i in range(2, max_factor):
         if j % i == 0:
-            factors.append(i)
             while j % i == 0:
+                factors.append(i)
                 j = j // i
         if i > j:
             break
@@ -134,7 +134,7 @@ def crt_inductive(residue_list: List[Tuple[int, int]]):
 
 
 def kronecker_symbol(a: int, b: int):
-    tab2 = [0, 1, 0, -1, 0, -1, 0, 1] # (-1)^((n^2 - 1) / 8)
+    tab2 = [0, 1, 0, -1, 0, -1, 0, 1]  # (-1)^((n^2 - 1) / 8)
     # Step 1
     if b == 0:
         if a != 1:
@@ -178,7 +178,7 @@ def kronecker_symbol(a: int, b: int):
             a = a // 2
 
         if v % 2 == 1:
-            k = tab2[b & 7]  # (-1)^((a^2 - 1)/8)
+            k = k * tab2[b & 7]  # (-1)^((a^2 - 1)/8)
 
         # Step 4
         if a & b & 2:
@@ -199,3 +199,5 @@ def test_kronecker_symbol():
     assert 1 == kronecker_symbol(2, 7)
     assert 1 == kronecker_symbol(2, 17)
     assert 1 == kronecker_symbol(2, 23)
+    assert 1 == kronecker_symbol(36881633580730759730498811283302146613,
+                                 233970423115425145524320034830162017933)
