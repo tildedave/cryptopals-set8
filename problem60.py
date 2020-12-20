@@ -10,7 +10,7 @@ import pytest
 from diffie_helman import DiffieHelman, ECDHKeypair
 from numtheory import crt_inductive, mod_sqrt, small_factors
 from elliptic_curve import (
-    EllipticCurve, MontgomeryCurve,
+    EllipticCurve, EllipticCurvePoint, MontgomeryCurve,
     montgomery_find_points,
     montgomery_ladder,
     montgomery_point_test,
@@ -160,6 +160,63 @@ def find_generator_point(curve: MontgomeryCurve, given_group_order: int):
             return montgomery_find_points(curve, u)[0]
 
 
+def kangaroo_attack(curve: MontgomeryCurve,
+                    g: EllipticCurvePoint,  # cyclic group generator
+                    point_order: int,  # order of point
+                    y: EllipticCurvePoint,  # start point
+                    a: int,  # lower bound of y
+                    b: int,  # upper bound of y
+                    ):
+    # Seems like we can just take the first parameter
+    k = 20  # Kangaroo parameter
+
+    def pseudorandom_map(u: int):  # u is the first parameter of (u, v)
+        return 2 ** (u % k)
+
+    f = pseudorandom_map
+    N = 0
+    for i in range(0, k):
+        N += pseudorandom_map(i)
+    N = 4 * (N // k)
+
+    # "Tame Kangaroo"
+    print(f'Tame kangaroo start; N={N}')
+    xT = 0  # Scalar
+    yT = montgomery_ladder(curve, g[0], b)  # Group element
+    yExp = b
+
+    for i in range(0, N):
+        xT += f(yT)
+        yExp += f(yT)
+        yT = montgomery_ladder(curve, g[0], yExp)
+
+    assert yT == montgomery_ladder(curve, g[0], b + xT), \
+        'Tame kangaroo did not have expected value'
+
+    # Tame kangaroo in place, now we run the wild kangaroo
+
+    print('Wild kangaroo start')
+    xW = 0  # Again a scalar
+    yW = y[0]  # Again a group element
+    yExp = 1
+    iterations = 0
+
+    while xW < b - a + xT:
+        if iterations % 1000 == 0:
+            print(iterations, xW, b - a + xT)
+        iterations += 1
+        xW += f(yW)
+        yExp += f(yW)
+        yW = montgomery_ladder(curve, y[0], yExp)
+
+        if yW == yT:
+            # Boom
+            print(f'Finished in {iterations} iterations')
+            return b + xT - xW
+
+    print('All done!')
+
+
 if __name__ == "__main__":
     random.seed(0)
 
@@ -193,23 +250,27 @@ if __name__ == "__main__":
     assert r == r_
     assert alice_keypair.secret % r in [m1, r - m1]
     assert alice_keypair.secret % r in [m1, m2]
+    # So we can forget about m2 for now and just work with m1.
+    # So n is either r - m1 or m1
+    # x = n + m * r --> n is known, m is unknown
 
     # We know alice_public is g^alice_secret
     # y = alice_public
 
-    g = 4  # Given point
-    g_ = montgomery_ladder(curve, g, r)
-    y = alice_public
-
-    # x = n + m * r --> n is known, m is unknown
-    # g' = (g^r) -> known
-    # y = g^n * g^(m * r) -->  (n + m * r)g
-
+    print(f'We know {alice_keypair.secret} = ±{m1} + m * {r}.  Solve for m')
+    g = point[0]  # Given starting point
+    g_ = montgomery_find_points(curve, montgomery_ladder(curve, g, r))[0]
+    g_m1_inverse = montgomery_ladder(curve, g, given_point_order - m1)
+    pt = montgomery_find_points(curve, g_m1_inverse)[0]
     # y' = alice_public * g^{-n} --> -n = residue mod r -> also known
+    # (n might be r - n in which case y' = alice_public * g^{n})
+    y_ = curve.add_points(alice_keypair.public, pt)
 
-    # So y' = (g')^(m) --> find m using kangaroo
+    m = kangaroo_attack(curve, point, given_point_order, y_,
+                        a=0, b=(given_point_order - 1) // r)
+    print(f'Kangaroo attacked returned value {m}')
+    assert m * r + m1 == alice_keypair.secret
 
-    # We need to kangaroo attack from m1, r2 and m2, r2
-    # secret = n + m * r
-    # g^(secret) = y  (public key)
-    # g^(m*r) =
+    # So goal now is to find m such that y_ = (g_)^m
+    # This will be done using the kangaroo-style attack (Problem 58).
+    # Once we have m, secret = m * r + n
