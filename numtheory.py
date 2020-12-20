@@ -11,8 +11,8 @@ def small_factors(j, max_factor=2**16):
     factors = []
     for i in range(2, max_factor):
         if j % i == 0:
+            factors.append(i)
             while j % i == 0:
-                factors.append(i)
                 j = j // i
         if i > j:
             break

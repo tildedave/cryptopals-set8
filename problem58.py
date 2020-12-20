@@ -27,6 +27,7 @@ for i in range(0, k):
 N = 4 * (N // k)
 print('N', N)
 
+
 def tame_kangaroo(f, N, g, a, b, y, precomputed_powers):
     # "Tame Kangaroo"
     xT = 0
@@ -38,6 +39,7 @@ def tame_kangaroo(f, N, g, a, b, y, precomputed_powers):
     assert yT == pow(g, b + xT, p), 'Tame kangaroo did not have expected value'
 
     return xT, yT
+
 
 def kangaroo_attack(f, N, g, a, b, y):
     # first build a table of g^f(yW) since there's only a finite number of these

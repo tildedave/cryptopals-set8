@@ -220,7 +220,6 @@ def mod_point(pt: EllipticCurvePoint, p: int) -> EllipticCurvePoint:
 
 
 def montgomery_ladder(curve: MontgomeryCurve, u: int, k: int) -> int:
-    # Implement ladder
     p = curve.prime
     a = curve.a
 
@@ -298,7 +297,6 @@ def test_montgomery_ladder():
     given_order = 29246302889428143187362802287225875743
 
     assert montgomery_ladder(curve, 4, given_order) == 0
-    # Should not happen
     assert montgomery_ladder(curve, 76600469441198017145391791613091732004, 11) == 0
 
 
