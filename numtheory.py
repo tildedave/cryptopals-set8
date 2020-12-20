@@ -78,6 +78,9 @@ def test_mod_sqrt():
 
 
 def mod_inverse(m: int, p: int):
+    if m == 0:
+        raise ValueError('Division by 0')
+
     # This works for p = 3 but maybe not p = 2
     return pow(m, p - 2, p)
 

@@ -7,12 +7,12 @@ from typing import Tuple, List
 
 import pytest
 
-from diffie_helman import DiffieHelman
+from diffie_helman import DiffieHelman, ECDHKeypair
 from numtheory import crt_inductive, mod_sqrt, small_factors
 from elliptic_curve import (
     EllipticCurve, MontgomeryCurve,
+    montgomery_find_points,
     montgomery_ladder,
-    montgomery_find_point,
     montgomery_point_test,
 )
 
@@ -25,7 +25,9 @@ given_group_order = 233970423115425145498902418297807005944
 
 def test_montgomery_find_point():
     given_v = 85518893674295321206118380980485522083
-    assert montgomery_find_point(curve, 4) == (given_v, p - given_v)
+    points = montgomery_find_points(curve, 4)
+    assert points[0] == (4, given_v)
+    assert points[1] == (4, p - given_v)
 
 
 def test_ladder_attack():
@@ -66,9 +68,11 @@ def find_twist_point_with_order(curve: MontgomeryCurve,
         return montgomery_ladder(curve, u, twist_order // q)
 
 
-def find_index(curve: MontgomeryCurve, r: int, twist_order: int) -> int:
+def find_index(curve: MontgomeryCurve,
+               keypair: ECDHKeypair,
+               r: int, twist_order: int) -> int:
     bogus_u = find_twist_point_with_order(curve, r, twist_order)
-    confused_response = montgomery_ladder(curve, bogus_u, alice_secret)
+    confused_response = montgomery_ladder(curve, bogus_u, keypair.secret)
 
     for x in range(1, r):
         current_point = montgomery_ladder(curve, bogus_u, x)
@@ -79,6 +83,7 @@ def find_index(curve: MontgomeryCurve, r: int, twist_order: int) -> int:
 
 
 def subgroup_confinement_residues(curve: MontgomeryCurve,
+                                  keypair: ECDHKeypair,
                                   twist_curve_order: int):
     """
     Return the residue of the secret key mod some value
@@ -89,11 +94,12 @@ def subgroup_confinement_residues(curve: MontgomeryCurve,
 
         # Either alice_secret == x mod r OR alice_secret == -x mod r
         # Need to clarify.  (Clarification will be done later through CRT.)
-        x = find_index(curve, r, twist_curve_order)
+        x = find_index(curve, keypair, r, twist_curve_order)
         yield (x, r)
 
 
 def filter_moduli(curve: MontgomeryCurve,
+                  keypair: ECDHKeypair,
                   twist_order: int,
                   residue_list: List[Tuple[int, int]]):
     residues = map(itemgetter(1), residue_list)
@@ -113,7 +119,7 @@ def filter_moduli(curve: MontgomeryCurve,
     # residues
     for r1, r2 in combinations(residues, 2):
         order = r1 * r2
-        x = find_index(curve, order, twist_order)
+        x = find_index(curve, keypair, order, twist_order)
         print(f'{x} mod {order} OR {order - x} mod {order}')
         # Now elimate possibilities that don't match this
         new_possibilities = []
@@ -151,20 +157,20 @@ def find_generator_point(curve: MontgomeryCurve, given_group_order: int):
                 # Bad order
                 break
         else:
-            return montgomery_find_point(curve, u)
+            return montgomery_find_points(curve, u)[0]
 
 
 if __name__ == "__main__":
     random.seed(0)
 
     point = (4, 85518893674295321206118380980485522083)
-    given_order = 29246302889428143187362802287225875743
-    dh = DiffieHelman(curve, point)
-    (alice_secret, alice_public) = dh.generate_keypair(given_order)
-    (bob_secret, bob_public) = dh.generate_keypair(given_order)
+    dh = DiffieHelman(curve, point, point_order=given_point_order)
 
-    alice_key = dh.compute_secret(bob_public, alice_secret)
-    bob_key = dh.compute_secret(alice_public, bob_secret)
+    alice_keypair = dh.generate_keypair()
+    bob_keypair = dh.generate_keypair()
+
+    alice_key = alice_keypair.compute_secret(bob_keypair.public)
+    bob_key = bob_keypair.compute_secret(alice_keypair.public)
 
     assert alice_key == bob_key, 'Key should have been shared'
 
@@ -177,15 +183,16 @@ if __name__ == "__main__":
     print(f'{twist_order} (twist order)')
     print(f'{given_group_order} (curve group order)')
 
-    residue_list = list(subgroup_confinement_residues(curve, twist_order))
-    option1, option2 = filter_moduli(curve, twist_order, residue_list)
+    residues = subgroup_confinement_residues(curve, alice_keypair, twist_order)
+    option1, option2 = filter_moduli(curve, alice_keypair, twist_order,
+                                     list(residues))
 
     # So these values are actually duplicative since r1 == r2 and m2 = r1 - m1
     m1, r = crt_inductive(option1)
     m2, r_ = crt_inductive(option2)
     assert r == r_
-    assert alice_secret % r in [m1, r - m1]
-    assert alice_secret % r in [m1, m2]
+    assert alice_keypair.secret % r in [m1, r - m1]
+    assert alice_keypair.secret % r in [m1, m2]
 
     # We know alice_public is g^alice_secret
     # y = alice_public

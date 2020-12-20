@@ -1,5 +1,7 @@
-from typing import Tuple, Union
+from typing import List, Tuple
 from random import randint
+
+import pytest
 
 from numtheory import kronecker_symbol, mod_divide, mod_sqrt
 
@@ -200,12 +202,27 @@ class MontgomeryCurve(EllipticCurve):
 
         return (self.b * v * v) % p == (u * u * u + self.a * u * u + u) % p
 
+    def add_points(self,
+                   p1: EllipticCurvePoint,
+                   p2: EllipticCurvePoint,
+                   ) -> EllipticCurvePoint:
+        # https://www.hyperelliptic.org/EFD/g1p/auto-montgom.html
+        x1, y1 = p1
+        x2, y2 = p2
+        a, b, p = self.a, self.b, self.prime
+
+        x3 = b * pow(y2 - y1, 2, p) * pow(x2 - x1, p - 1 - 2, p) - a - x1 - x2
+        y3_first = mod_divide((2*x1 + x2 + a) * (y2 - y1), x2 - x1, p)
+        y3_second = mod_divide(b * (y2 - y1)**3, (x2 - x1)**3, p)
+
+        return mod_point((x3, y3_first - y3_second - y1), p)
+
     def scalar_mult(self,
                     p1: EllipticCurvePoint,
                     k: int) -> EllipticCurvePoint:
         u_ = montgomery_ladder(self, p1[0], k)
         # (u, v) and (u, -v) are both valid
-        return (u_, montgomery_find_point(self, u_)[0])
+        return montgomery_find_points(self, u_)[0]
 
     def find_point_on_curve(self) -> EllipticCurvePoint:
         MAX_ITERATIONS = 5000
@@ -214,7 +231,7 @@ class MontgomeryCurve(EllipticCurve):
             if not montgomery_point_test(self, u):
                 continue
 
-            return (u, montgomery_find_point(self, u)[0])
+            return montgomery_find_points(self, u)[0]
 
         raise ValueError('Unable to find point on curve')
 
@@ -238,8 +255,9 @@ def montgomery_ladder(curve: MontgomeryCurve, u: int, k: int) -> int:
         b = 1 & (k >> i)
         u2, u3 = cswap(u2, u3, b)
         w2, w3 = cswap(w2, w3, b)
-        u3, w3 = mod_point(((u2*u3 - w2*w3) ** 2, u * (u2*w3 - w2*u3) ** 2), p)
-        u2, w2 = mod_point(((u2 ** 2 - w2 ** 2) ** 2,
+        u3, w3 = mod_point((pow(u2*u3 - w2*w3, 2, p),
+                           u * pow(u2*w3 - w2*u3, 2, p)), p)
+        u2, w2 = mod_point((pow(u2 ** 2 - w2 ** 2, 2, p),
                             4*u2*w2 * (u2 ** 2 + a * u2 * w2 + w2 ** 2)), p)
         u2, u3 = cswap(u2, u3, b)
         w2, w3 = cswap(w2, w3, b)
@@ -247,23 +265,23 @@ def montgomery_ladder(curve: MontgomeryCurve, u: int, k: int) -> int:
     return (u2 * pow(w2, p-2, p)) % p
 
 
-def montgomery_find_point(curve: MontgomeryCurve,
-                          u: int,
-                          ) -> Tuple[int, int]:
+def montgomery_find_points(curve: MontgomeryCurve,
+                           u: int,
+                           ) -> List[Tuple[int, int]]:
     p = curve.prime
     a = curve.a
     b = curve.b
 
     rhs = (u ** 3 + a * (u ** 2) + u) % p
     if rhs == 0:
-        return (0, 0)
+        return [(0, 0)]
 
     v = mod_sqrt(mod_divide(rhs, b, p), p)
 
     if p - v < v:
-        return (p - v, v)
+        return [(u, p - v), (u, v)]
 
-    return (v, p - v)
+    return [(u, v), (u, p - v)]
 
 
 def montgomery_point_test(curve: MontgomeryCurve, u: int) -> bool:
@@ -304,11 +322,41 @@ def test_montgomery_ladder():
     curve = MontgomeryCurve(p, 534, 1)
     given_order = 29246302889428143187362802287225875743
 
+    assert montgomery_ladder(curve, 4, 1) == 4
     assert montgomery_ladder(curve, 4, given_order) == 0
-    assert montgomery_ladder(curve, 76600469441198017145391791613091732004, 11) == 0
+    bogus_u = 76600469441198017145391791613091732004
+    assert montgomery_ladder(curve, bogus_u, 11) == 0
 
 
-def test_montgomery_find_point_on_curve():
+@pytest.mark.skip('Something wrong with my understanding here')
+def test_montgomery_add_inverse():
+    p = 233970423115425145524320034830162017933
+    curve = MontgomeryCurve(p, 534, 1)
+    pt = (4, 85518893674295321206118380980485522083)
+
+    addition = curve.add_points(pt, (pt[0], -pt[1]))
+    assert addition[0] == 0
+
+
+def test_montgomery_add():
+    p = 233970423115425145524320034830162017933
+    curve = MontgomeryCurve(p, 534, 1)
+    pt = (4, 85518893674295321206118380980485522083)
+
+    u1 = montgomery_ladder(curve, 4, 3)
+    u2 = montgomery_ladder(curve, 4, 2)
+
+    pt1 = montgomery_find_points(curve, u1)[0]
+    pt2 = montgomery_find_points(curve, u2)[0]
+
+    given_point_order = 29246302889428143187362802287225875743
+    assert montgomery_ladder(curve, 4, given_point_order) == 0
+
+    five_point = curve.add_points(pt1, pt2)
+    assert montgomery_ladder(curve, 4, 5) == five_point[0]
+
+
+def test_montgomery_find_points_on_curve():
     p = 233970423115425145524320034830162017933
     given_order = 233970423115425145498902418297807005944
     curve = MontgomeryCurve(p, 534, 1)
