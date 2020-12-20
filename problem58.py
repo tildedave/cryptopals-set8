@@ -15,20 +15,22 @@ y1 = 776007384803268950539500570567736587665462918929805277575459760744661755860
 # Determined: g^359579674340 = y2
 y2 = 9388897478013399550694114614498790691034187453089355259602614074132918843899833277397448144245883225611726912025846772975325932794909655215329941809013733
 
+
 ###########################
 # Begin Kangaroo parameters
 ###########################
 k = 20
 def pseudorandom_map(n):
     return 2 ** (n % k)
+
+
 N = 0
 for i in range(0, k):
     N += pseudorandom_map(i)
 N = 4 * (N // k)
-print('N', N)
 
 
-def tame_kangaroo(f, N, g, a, b, y, precomputed_powers):
+def tame_kangaroo(p, f, N, g, b, precomputed_powers):
     # "Tame Kangaroo"
     xT = 0
     yT = pow(g, b, p)
@@ -41,16 +43,24 @@ def tame_kangaroo(f, N, g, a, b, y, precomputed_powers):
     return xT, yT
 
 
-def kangaroo_attack(f, N, g, a, b, y):
-    # first build a table of g^f(yW) since there's only a finite number of these
+def kangaroo_attack(p: int,  # prime everything is modulo by
+                    f,       # psuedorandom mapping function
+                    N: int,  # number of kangaroo steps to generate
+                             # (higher N means more searching)
+                    g: int,  # cyclic group generator
+                    a: int,  # lower bound of y
+                    b: int,  # upper bound of y
+                    y: int,  # start index
+                    ):
+    # first build a table of g^f(yW) since there's only a finite number of
+    # these
     precomputed_powers = {f(x): pow(g, f(x), p) for x in range(0, k)}
 
     # f is a psuedorandom mapping function
     # g is a generator of the cyclic group
     # b is the upper bound on the discrete logarithm range
 
-    xT, yT = tame_kangaroo(f, N, g, a, b, y, precomputed_powers)
-    print('Tame Kangaroo completed', yT)
+    xT, yT = tame_kangaroo(p, f, N, g, b, precomputed_powers)
 
     # "Wild Kangaroo"
     xW = 0
@@ -64,7 +74,8 @@ def kangaroo_attack(f, N, g, a, b, y):
 
         if yW == yT:
             # Boom
-            assert pow(g, b + xT - xW, p) == y, 'Discrete logarithm was not solved'
+            assert pow(g, b + xT - xW, p) == y, \
+                'Discrete logarithm was not solved'
             print(f'Finished in {iterations} iterations')
             return b + xT - xW
 
@@ -97,7 +108,7 @@ if __name__ == '__main__':
     assert (g * g_inverse) % p == 1, 'g_inverse was not inverse of g'
 
     y_ = (y * pow(g_inverse, n, p)) % p
-    m = kangaroo_attack(pseudorandom_map, N, g_, 0, (q - 1) // r, y_)
+    m = kangaroo_attack(p, pseudorandom_map, N, g_, 0, (q - 1) // r, y_)
 
     assert n + m * r == bob_secret
     print(f'All done!  Successfully cracked bob_secret using {len(residues)} residues and kangaroo attack')
