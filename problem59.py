@@ -7,7 +7,6 @@ from diffie_helman import DiffieHelman
 from elliptic_curve import (
     EllipticCurveIdentity,
     WeierstrassCurve,
-    add_point,
 )
 from numtheory import small_factors, crt_inductive
 
@@ -41,7 +40,7 @@ def subgroup_confinement_residues(dh: DiffieHelman,
                 if current_point == confused_response:
                     yield (x, r)
                     break
-                current_point = add_point(current_point, bogus_point, curve)
+                current_point = curve.add_points(current_point, bogus_point)
         except ValueError as err:
             continue
 
@@ -83,6 +82,7 @@ if __name__ == "__main__":
 
     # Ready to attack
     x, _ = crt_inductive(crt_residues)
+
     assert x == bob_secret, 'Brute forced secret with bogus points'
     print(f'All done!  Used {len(crt_residues)} residues to determine '
           f'{x} == {bob_secret}')

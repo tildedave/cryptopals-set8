@@ -12,7 +12,7 @@ from numtheory import crt_inductive, mod_sqrt, small_factors
 from elliptic_curve import (
     EllipticCurve, MontgomeryCurve,
     montgomery_ladder,
-    montgomery_point_inverse,
+    montgomery_find_point,
     montgomery_point_test,
 )
 
@@ -23,9 +23,9 @@ given_point_order = 29246302889428143187362802287225875743
 given_group_order = 233970423115425145498902418297807005944
 
 
-def test_montgomery_inverse():
+def test_montgomery_find_point():
     given_v = 85518893674295321206118380980485522083
-    assert montgomery_point_inverse(curve, 4) == (given_v, p - given_v)
+    assert montgomery_find_point(curve, 4) == (given_v, p - given_v)
 
 
 def test_ladder_attack():
@@ -66,7 +66,7 @@ def find_twist_point_with_order(curve: MontgomeryCurve,
         return montgomery_ladder(curve, u, twist_order // q)
 
 
-def find_power(curve: MontgomeryCurve, r: int, twist_order: int) -> int:
+def find_index(curve: MontgomeryCurve, r: int, twist_order: int) -> int:
     bogus_u = find_twist_point_with_order(curve, r, twist_order)
     confused_response = montgomery_ladder(curve, bogus_u, alice_secret)
 
@@ -83,15 +83,13 @@ def subgroup_confinement_residues(curve: MontgomeryCurve,
     """
     Return the residue of the secret key mod some value
     """
-    for r in small_factors(twist_curve_order, max_factor=2**16):  # should be 24
+    for r in small_factors(twist_curve_order, max_factor=2**16):
         if r == 2:
             continue
 
-        print(f'Factor {r}')
-
         # Either alice_secret == x mod r OR alice_secret == -x mod r
         # Need to clarify.  (Clarification will be done later through CRT.)
-        x = find_power(curve, r, twist_curve_order)
+        x = find_index(curve, r, twist_curve_order)
         yield (x, r)
 
 
@@ -115,7 +113,7 @@ def filter_moduli(curve: MontgomeryCurve,
     # residues
     for r1, r2 in combinations(residues, 2):
         order = r1 * r2
-        x = find_power(curve, order, twist_order)
+        x = find_index(curve, order, twist_order)
         print(f'{x} mod {order} OR {order - x} mod {order}')
         # Now elimate possibilities that don't match this
         new_possibilities = []
@@ -139,11 +137,29 @@ def filter_moduli(curve: MontgomeryCurve,
     return residue_possibilities
 
 
+def find_generator_point(curve: MontgomeryCurve, given_group_order: int):
+    """
+    Find a point that generates the group.  This assumes that the group order
+    has no small factors (similar to the given group) so most randomly selected
+    points will generate the group
+    """
+    MAX_TRIES = 10
+    for _ in range(MAX_TRIES):
+        u = randint(1, curve.prime)
+        for factor in small_factors(given_group_order - 1):
+            if montgomery_ladder(curve, u, factor) == 0:
+                # Bad order
+                break
+        else:
+            return montgomery_find_point(curve, u)
+
+
 if __name__ == "__main__":
+    random.seed(0)
+
     point = (4, 85518893674295321206118380980485522083)
     given_order = 29246302889428143187362802287225875743
     dh = DiffieHelman(curve, point)
-    random.seed(0)
     (alice_secret, alice_public) = dh.generate_keypair(given_order)
     (bob_secret, bob_public) = dh.generate_keypair(given_order)
 
@@ -165,10 +181,28 @@ if __name__ == "__main__":
     option1, option2 = filter_moduli(curve, twist_order, residue_list)
 
     # So these values are actually duplicative since r1 == r2 and m2 = r1 - m1
-    m1, r1 = crt_inductive(option1)
-    m2, r2 = crt_inductive(option2)
+    m1, r = crt_inductive(option1)
+    m2, r_ = crt_inductive(option2)
+    assert r == r_
+    assert alice_secret % r in [m1, r - m1]
+    assert alice_secret % r in [m1, m2]
 
-    assert alice_secret % r1 == m1 or alice_secret % r2 == m2
+    # We know alice_public is g^alice_secret
+    # y = alice_public
+
+    g = 4  # Given point
+    g_ = montgomery_ladder(curve, g, r)
+    y = alice_public
+
+    # x = n + m * r --> n is known, m is unknown
+    # g' = (g^r) -> known
+    # y = g^n * g^(m * r) -->  (n + m * r)g
+
+    # y' = alice_public * g^{-n} --> -n = residue mod r -> also known
+
+    # So y' = (g')^(m) --> find m using kangaroo
 
     # We need to kangaroo attack from m1, r2 and m2, r2
-
+    # secret = n + m * r
+    # g^(secret) = y  (public key)
+    # g^(m*r) =

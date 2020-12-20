@@ -55,8 +55,10 @@ def find_residues(j, p, secret):
         b = brute_force_digest(digest, h, r, p)
         yield (b, r)
 
+
 if __name__ == '__main__':
     crt_moduli = list(find_residues(j, p, bob_secret))
     x, _ = crt_inductive(crt_moduli)
     assert bob_secret == x
-    print(f'All done!  Successfully cracked bob_secret using {len(crt_moduli)} samples')
+    print(f'All done!  Successfully cracked bob_secret using '
+          f'{len(crt_moduli)} samples')

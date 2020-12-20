@@ -28,6 +28,15 @@ class EllipticCurve:
                     n: int) -> EllipticCurvePoint:
         raise NotImplementedError
 
+    def add_points(self,
+                   p1: EllipticCurvePoint,
+                   p2: EllipticCurvePoint,
+                   ) -> EllipticCurvePoint:
+        raise NotImplementedError
+
+    def double_point(self, p1: EllipticCurvePoint) -> EllipticCurvePoint:
+        return self.add_points(p1, p1)
+
     def find_point_on_curve(self) -> EllipticCurvePoint:
         raise NotImplementedError
 
@@ -94,11 +103,45 @@ class WeierstrassCurve(EllipticCurve):
         z = p1
         while n > 0:
             if n % 2 == 1:
-                y = add_point(z, y, self)
+                y = self.add_points(z, y)
             n = n // 2
-            z = add_point(z, z, self)
+            z = self.double_point(z)
 
         return y
+
+    def invert_point(self,
+                     p1: EllipticCurvePoint,
+                     ) -> EllipticCurvePoint:
+        """
+        Return the inverse of the given elliptic curve point
+        """
+        return (p1[0], self.prime - p1[1])
+
+    def add_points(self,
+                   p1: EllipticCurvePoint,
+                   p2: EllipticCurvePoint,
+                   ) -> EllipticCurvePoint:
+        if p1 == EllipticCurveIdentity:
+            return p2
+
+        if p2 == EllipticCurveIdentity:
+            return p1
+
+        if p1 == self.invert_point(p2):
+            return EllipticCurveIdentity
+
+        p = self.prime
+        x1, y1 = p1
+        x2, y2 = p2
+        if p1 == p2:
+            m = mod_divide(3 * x1 * x1 + self.a, 2 * y1, p)
+        else:
+            m = mod_divide(y2 - y1, x2 - x1, p)
+
+        x3 = (m * m - x1 - x2) % p
+        y3 = (m * (x1 - x3) - y1) % p
+
+        return (x3, y3)
 
     def find_point_on_curve(self) -> EllipticCurvePoint:
         MAX_ITERATIONS = 5000
@@ -121,49 +164,14 @@ class WeierstrassCurve(EllipticCurve):
         return point is EllipticCurveIdentity
 
 
-def invert_point(p1: EllipticCurvePoint,
-                 curve: WeierstrassCurve,
-                 ) -> EllipticCurvePoint:
-    """
-    Return the inverse of the given elliptic curve point
-    """
-    return (p1[0], curve.prime - p1[1])
-
-
-def add_point(p1: EllipticCurvePoint,
-              p2: EllipticCurvePoint,
-              curve: WeierstrassCurve,
-              ) -> EllipticCurvePoint:
-    if p1 == EllipticCurveIdentity:
-        return p2
-
-    if p2 == EllipticCurveIdentity:
-        return p1
-
-    if p1 == invert_point(p2, curve):
-        return EllipticCurveIdentity
-
-    p = curve.prime
-    x1, y1 = p1
-    x2, y2 = p2
-    if p1 == p2:
-        m = mod_divide(3 * x1 * x1 + curve.a, 2 * y1, p)
-    else:
-        m = mod_divide(y2 - y1, x2 - x1, p)
-
-    x3 = (m * m - x1 - x2) % p
-    y3 = (m * (x1 - x3) - y1) % p
-
-    return (x3, y3)
-
-
 def find_point_order(pt: EllipticCurvePoint, curve: WeierstrassCurve):
     """
     Debugging method to find the order of a given point.  Uses repeated adding
     """
     order = 1
+    original_point = pt
     while pt != EllipticCurveIdentity:
-        pt = add_point(pt, pt, curve)
+        pt = curve.add_points(pt, original_point)
         order += 1
 
     return order
@@ -197,7 +205,7 @@ class MontgomeryCurve(EllipticCurve):
                     k: int) -> EllipticCurvePoint:
         u_ = montgomery_ladder(self, p1[0], k)
         # (u, v) and (u, -v) are both valid
-        return (u_, montgomery_point_inverse(self, u_)[0])
+        return (u_, montgomery_find_point(self, u_)[0])
 
     def find_point_on_curve(self) -> EllipticCurvePoint:
         MAX_ITERATIONS = 5000
@@ -206,7 +214,7 @@ class MontgomeryCurve(EllipticCurve):
             if not montgomery_point_test(self, u):
                 continue
 
-            return (u, montgomery_point_inverse(self, u)[0])
+            return (u, montgomery_find_point(self, u)[0])
 
         raise ValueError('Unable to find point on curve')
 
@@ -239,9 +247,9 @@ def montgomery_ladder(curve: MontgomeryCurve, u: int, k: int) -> int:
     return (u2 * pow(w2, p-2, p)) % p
 
 
-def montgomery_point_inverse(curve: MontgomeryCurve,
-                             u: int,
-                             ) -> Tuple[int, int]:
+def montgomery_find_point(curve: MontgomeryCurve,
+                          u: int,
+                          ) -> Tuple[int, int]:
     p = curve.prime
     a = curve.a
     b = curve.b
