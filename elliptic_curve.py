@@ -52,11 +52,11 @@ class EllipticCurve:
             assert pt in self, 'find_point_on_curve returned invalid value'
 
             candidate_point = self.scalar_mult(pt, curve_order // r)
-            if not self.is_identity(candidate_point):
+            if self.is_identity(candidate_point):
                 continue
 
-            if self.is_identity(self.scalar_mult(candidate_point, r)):
-                return candidate_point
+            assert self.is_identity(self.scalar_mult(candidate_point, r))
+            return candidate_point
 
         raise ValueError(f'Unable to find point of order {r} on curve {self}')
 

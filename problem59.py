@@ -3,7 +3,7 @@ from typing import Tuple
 from functools import reduce
 from operator import itemgetter, mul
 
-from diffie_helman import DiffieHelman
+from diffie_helman import DiffieHelman, ECDHKeypair
 from elliptic_curve import (
     EllipticCurveIdentity,
     WeierstrassCurve,
@@ -11,16 +11,16 @@ from elliptic_curve import (
 from numtheory import small_factors, crt_inductive
 
 p = 233970423115425145524320034830162017933
-curve = WeierstrassCurve(p, -95051, 11279326)
+given_curve = WeierstrassCurve(p, -95051, 11279326)
 point = (182, 85518893674295321206118380980485522083)
-assert point in curve, 'Point was not on curve (somehow)'
+assert point in given_curve, 'Point was not on curve (somehow)'
 
 given_order = 29246302889428143187362802287225875743
-pt = curve.scalar_mult(point, given_order)
+pt = given_curve.scalar_mult(point, given_order)
 assert pt == EllipticCurveIdentity, 'Point did not have expected order'
 
 
-def subgroup_confinement_residues(dh: DiffieHelman,
+def subgroup_confinement_residues(bob_keypair: ECDHKeypair,
                                   curve: WeierstrassCurve,
                                   curve_order: int):
     """
@@ -33,7 +33,7 @@ def subgroup_confinement_residues(dh: DiffieHelman,
 
         try:
             bogus_point = curve.find_point_of_order(r, curve_order)
-            confused_response = dh.compute_secret(bogus_point, bob_secret)
+            confused_response = bob_keypair.compute_secret(bogus_point)
             # brute for which r for confused response
             current_point = bogus_point
             for x in range(1, r):
@@ -46,12 +46,12 @@ def subgroup_confinement_residues(dh: DiffieHelman,
 
 
 if __name__ == "__main__":
-    dh = DiffieHelman(curve, point)
-    (alice_secret, alice_public) = dh.generate_keypair(given_order)
-    (bob_secret, bob_public) = dh.generate_keypair(given_order)
+    dh = DiffieHelman(given_curve, point, point_order=given_order)
+    alice_keypair = dh.generate_keypair()
+    bob_keypair = dh.generate_keypair()
 
-    alice_key = dh.compute_secret(bob_public, alice_secret)
-    bob_key = dh.compute_secret(alice_public, bob_secret)
+    alice_key = alice_keypair.compute_secret(bob_keypair.public)
+    bob_key = bob_keypair.compute_secret(alice_keypair.public)
 
     assert alice_key == bob_key, 'Key should have been shared'
 
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     crt_residues = []
     for bad_curve, bad_curve_order in zip(bad_curves, curve_orders):
         print(f'Computing residues for {bad_curve}')
-        crt_residues += list(subgroup_confinement_residues(dh,
+        crt_residues += list(subgroup_confinement_residues(bob_keypair,
                                                            bad_curve,
                                                            bad_curve_order))
         # Must remove duplicates because the given bad curves might end up
@@ -80,9 +80,12 @@ if __name__ == "__main__":
         if q > given_order:
             break
 
+    for m, r in crt_residues:
+        assert bob_keypair.secret % r == m
+
     # Ready to attack
     x, _ = crt_inductive(crt_residues)
 
-    assert x == bob_secret, 'Brute forced secret with bogus points'
+    assert x == bob_keypair.secret, 'Brute forced secret with bogus points'
     print(f'All done!  Used {len(crt_residues)} residues to determine '
-          f'{x} == {bob_secret}')
+          f'{x} == {bob_keypair.secret}')
