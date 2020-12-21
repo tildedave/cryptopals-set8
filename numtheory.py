@@ -1,23 +1,20 @@
 from random import randint
-from typing import Tuple, List
+from typing import Generator, Tuple, List
 
 import pytest
 
 
-def small_factors(j, max_factor=2**16):
+def small_factors(j, max_factor=2**16) -> Generator[int, None, None]:
     """
     Return all factors of a passed in integer < 2 ** 16
     """
-    factors = []
     for i in range(2, max_factor):
         if j % i == 0:
-            factors.append(i)
+            yield i
             while j % i == 0:
                 j = j // i
         if i > j:
             break
-
-    return factors
 
 
 def mod_sqrt(a: int, p: int):

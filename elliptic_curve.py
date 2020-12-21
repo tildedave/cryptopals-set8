@@ -180,8 +180,10 @@ def find_point_order(pt: EllipticCurvePoint, curve: WeierstrassCurve):
 
 
 def cswap(n1, n2, z):
-    d = int(z != 0)
-    return (n1 * (1 - d) + n2 * d, n2 * (1 - d) + n1 * d)
+    if z == 0:
+        return (n1, n2)
+    else:
+        return (n2, n1)
 
 
 class MontgomeryCurve(EllipticCurve):
@@ -255,10 +257,9 @@ def montgomery_ladder(curve: MontgomeryCurve, u: int, k: int) -> int:
         b = 1 & (k >> i)
         u2, u3 = cswap(u2, u3, b)
         w2, w3 = cswap(w2, w3, b)
-        u3, w3 = mod_point((pow(u2*u3 - w2*w3, 2, p),
-                           u * pow(u2*w3 - w2*u3, 2, p)), p)
-        u2, w2 = mod_point((pow(u2 ** 2 - w2 ** 2, 2, p),
-                            4*u2*w2 * (u2 ** 2 + a * u2 * w2 + w2 ** 2)), p)
+        u3, w3 = pow(u2*u3 - w2*w3, 2, p), u * pow(u2*w3 - w2*u3, 2, p)
+        u2, w2 = pow(u2 ** 2 - w2 ** 2, 2, p), \
+            (4*u2*w2 * (u2 ** 2 + a * u2 * w2 + w2 ** 2)) % p
         u2, u3 = cswap(u2, u3, b)
         w2, w3 = cswap(w2, w3, b)
 
