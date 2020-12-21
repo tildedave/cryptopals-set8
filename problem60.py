@@ -208,8 +208,9 @@ def kangaroo_attack(curve: MontgomeryCurve,
     tame_start = time.time()
     print(f'Tame kangaroo start; N={N}')
     xT = 0  # Scalar
-    yT = curve.scalar_mult(g, b)  # montgomery_ladder(curve, g[0], b)  # Group element
+    # yT = curve.scalar_mult(g, b)  # montgomery_ladder(curve, g[0], b)  # Group element
 
+    yT = montgomery_ladder(curve, g[0], b)
     yExp = b
 
     last = time.time()
@@ -218,21 +219,10 @@ def kangaroo_attack(curve: MontgomeryCurve,
             print(i, time.time() - last)
             last = time.time()
 
-        print(i, xT, yT)
-
-        old_xT = xT
         xT += f(yT)
         yExp = (yExp + f(yT)) % point_order
-        # yT = montgomery_ladder(curve, g[0], yExp)
-        # Up until now yT has order b + old_xT
-        assert montgomery_ladder(curve, g[0], b + old_xT) == yT[0]
-        assert montgomery_ladder(curve, g[0], f(yT)) == precomputed_map[f(yT)][0]
-
-        yT = curve.add_points(yT, precomputed_map[f(yT)])
-        print(f'xT {xT} yT {yT} {f(yT)} ',
-              f'expected: {montgomery_ladder(curve, g[0], b + xT)} ',
-              f'actual: {montgomery_ladder(curve, g[0], yExp)}')
-        assert yT[0] == montgomery_ladder(curve, g[0], b + xT), \
+        yT = montgomery_ladder(curve, g[0], yExp)
+        assert yT == montgomery_ladder(curve, g[0], b + xT), \
             'Tame kangaroo did not have expected value'
     print(f'Time kangaroo complete; time={time.time() - tame_start}')
     # Tame kangaroo in place, now we run the wild kangaroo
@@ -322,7 +312,7 @@ if __name__ == "__main__":
     # (n might be r - n in which case y' = alice_public * g^{n})
     y_ = curve.add_points(alice_keypair.public, pt)
 
-    m = kangaroo_attack(curve, point, given_point_order, y_,
+    m = kangaroo_attack(curve, g_, given_point_order, y_,
                         a=0, b=(given_point_order - 1) // r)
     print(f'Kangaroo attacked returned value {m}')
     assert m * r + m1 == alice_keypair.secret
