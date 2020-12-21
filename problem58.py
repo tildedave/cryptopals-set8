@@ -60,7 +60,9 @@ def kangaroo_attack(p: int,  # prime everything is modulo by
     # g is a generator of the cyclic group
     # b is the upper bound on the discrete logarithm range
 
+    print(f'Tame kangaroo beginning... N={N}')
     xT, yT = tame_kangaroo(p, f, N, g, b, precomputed_powers)
+    print('Tame kangaroo complete')
 
     # "Wild Kangaroo"
     xW = 0

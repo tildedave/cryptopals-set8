@@ -3,7 +3,7 @@ from operator import itemgetter
 import random
 from random import randint
 import time
-from typing import Callable, Optional, Sequence, Tuple, List, Union
+from typing import Iterator, Optional, Tuple, List, Union
 
 import pytest
 
@@ -19,6 +19,7 @@ from elliptic_curve import (
 
 p = 233970423115425145524320034830162017933
 curve = MontgomeryCurve(p, 534, 1)
+w_curve = WeierstrassCurve(p, -95051, 11279326)
 
 given_point_order = 29246302889428143187362802287225875743
 given_group_order = 233970423115425145498902418297807005944
@@ -73,7 +74,7 @@ def find_index(curve: MontgomeryCurve,
                keypair: ECDHKeypair,
                r: int,
                twist_order: int,
-               order_indices: Optional[Sequence[int]] = None) -> int:
+               order_indices: Optional[Iterator[int]] = None) -> int:
     bogus_u = find_twist_point_with_order(curve, r, twist_order)
     confused_response = montgomery_ladder(curve, bogus_u, keypair.secret)
     if not order_indices:
@@ -178,71 +179,67 @@ def find_generator_point(curve: MontgomeryCurve, given_group_order: int):
             return montgomery_find_points(curve, u)[0]
 
 
-def kangaroo_attack(curve: MontgomeryCurve,
+def kangaroo_attack(w_curve: WeierstrassCurve,
                     g: EllipticCurvePoint,  # cyclic group generator
-                    point_order: int,  # order of point
                     y: EllipticCurvePoint,  # start point
-                    a: int,  # lower bound of y
-                    b: int,  # upper bound of y
+                    a: int,  # lower bound
+                    b: int,  # upper bound
                     ):
     # Seems like we can just take the first parameter
     k = 20  # Kangaroo parameter
 
     # u is the first parameter of (u, v)
-    def pseudorandom_map(u: Union[int, EllipticCurvePoint]):
-        if not isinstance(u, int):
-            u = u[0]
-        return 2 ** (u % k)
+    def pseudorandom_map(u: Union[EllipticCurvePoint, int]):
+        if isinstance(u, int):
+            u = (u, u)
+        return 2 ** (u[0] % k)
 
     f = pseudorandom_map
-    precomputed_map = {f(x): curve.scalar_mult(g, f(x)) for x in range(0, k)}
-    for x in range(0, k):
-        assert montgomery_ladder(curve, g[0], f(x)) == precomputed_map[f(x)][0]
+    precomputed_map = {f(x): w_curve.scalar_mult(g, f(x)) for x in range(0, k)}
 
-    N = 0
-    for i in range(0, k):
-        N += pseudorandom_map(i)
-    N = 4 * (N // k)
+    N = 6 * (sum(pseudorandom_map(i) for i in range(0, k)) // k)
 
     # "Tame Kangaroo"
+    print(f'Tame kangaroo start; N={N}; g={g}')
     tame_start = time.time()
-    print(f'Tame kangaroo start; N={N}')
     xT = 0  # Scalar
-    # yT = curve.scalar_mult(g, b)  # montgomery_ladder(curve, g[0], b)  # Group element
-
-    yT = montgomery_ladder(curve, g[0], b)
-    yExp = b
+    yT = w_curve.scalar_mult(g, b)
 
     last = time.time()
     for i in range(0, N):
-        if i % 10_000 == 0:
+        if i % 100_000 == 0:
             print(i, time.time() - last)
             last = time.time()
 
         xT += f(yT)
-        yExp = (yExp + f(yT)) % point_order
-        yT = montgomery_ladder(curve, g[0], yExp)
-        assert yT == montgomery_ladder(curve, g[0], b + xT), \
-            'Tame kangaroo did not have expected value'
-    print(f'Time kangaroo complete; time={time.time() - tame_start}')
-    # Tame kangaroo in place, now we run the wild kangaroo
+        yT = w_curve.add_points(yT, precomputed_map[f(yT)])
 
-    print('Wild kangaroo start')
+    assert yT == w_curve.scalar_mult(g, b + xT), \
+        'Tame kangaroo did not have expected value'
+
+    print(f'Time kangaroo complete; xT={xT}, yT={yT}, '
+          f'time={time.time() - tame_start}')
+
+    # Tame kangaroo in place, now we run the wild kangaroo
     xW = 0  # Again a scalar
-    yW = y  # [0]  # Again a group element
+    yW = y  # Again a group element
+
+    # yT = (b+xT)g
+    # y = g^{secret - n}
+    print(f'Wild kangaroo start - {a} <= answer <= {b}, yW={yW}')
     iterations = 0
 
     last_time = time.time()
-    while xW < b - a + xT:
-        if iterations % 10_000 == 0:
-            print(iterations, xW, b - a + xT, time.time() - last_time)
+    upper_bound = b - a + xT
+    while xW < upper_bound:
+        if iterations % 100_000 == 0:
+            duration = time.time() - last_time
+            print(iterations, b + xT - xW, xW, b - a + xT, duration)
             last_time = time.time()
 
         iterations += 1
         xW += f(yW)
-        yW = curve.add_points(yW, precomputed_map[f(yW)])
-        # yExp = (yExp + f(yW)) % point_order
-        # yW = montgomery_ladder(curve, y[0], yExp)
+        yW = w_curve.add_points(yW, precomputed_map[f(yW)])
 
         if yW == yT:
             # Boom
@@ -250,6 +247,34 @@ def kangaroo_attack(curve: MontgomeryCurve,
             return b + xT - xW
 
     print('All done!')
+
+
+def w_point_to_m_curve(pt: EllipticCurvePoint):
+    return (pt[0] - 178, pt[1])
+
+
+def m_point_to_w_curve(pt: EllipticCurvePoint):
+    return (pt[0] + 178, pt[1])
+
+
+def test_map():
+    curve = MontgomeryCurve(p, 534, 1)
+    w_curve = WeierstrassCurve(p, -95051, 11279326)
+
+    point = (4, 85518893674295321206118380980485522083)
+    dh = DiffieHelman(curve, point, point_order=given_point_order)
+
+    expected = (182, 85518893674295321206118380980485522083)
+    assert m_point_to_w_curve(point) == expected
+
+    alice_keypair = dh.generate_keypair()
+    alice_public = alice_keypair.public
+
+    assert curve.is_identity(
+        curve.scalar_mult(alice_public, given_point_order))
+    assert w_curve.is_identity(w_curve.scalar_mult(
+        m_point_to_w_curve(alice_public),
+        given_point_order))
 
 
 if __name__ == "__main__":
@@ -304,19 +329,20 @@ if __name__ == "__main__":
     # y = alice_public
 
     print(f'We know {alice_keypair.secret} = ±{m1} + m * {r}.  Solve for m')
-    g = point[0]  # Given starting point
-    g_ = montgomery_find_points(curve, montgomery_ladder(curve, g, r))[0]
-    g_m1_inverse = montgomery_ladder(curve, g, given_point_order - m1)
-    pt = montgomery_find_points(curve, g_m1_inverse)[0]
-    # y' = alice_public * g^{-n} --> -n = residue mod r -> also known
-    # (n might be r - n in which case y' = alice_public * g^{n})
-    y_ = curve.add_points(alice_keypair.public, pt)
 
-    m = kangaroo_attack(curve, g_, given_point_order, y_,
+    # We do the attack on the equivalent weierstrass curve since operations
+    # with it are much faster :)
+    w_curve = WeierstrassCurve(p, -95051, 11279326)
+    g = m_point_to_w_curve(point)
+    assert g == (182, 85518893674295321206118380980485522083)
+
+    alice_public = m_point_to_w_curve(alice_keypair.public)
+    g_ = w_curve.scalar_mult(g, r)
+    invert_point = w_curve.invert_point(w_curve.scalar_mult(g, m1))
+    y_ = w_curve.add_points(alice_public, invert_point)
+
+    m = kangaroo_attack(w_curve, g=g_, y=y_,
                         a=0, b=(given_point_order - 1) // r)
+    assert m, 'Should have returned a value'
     print(f'Kangaroo attacked returned value {m}')
     assert m * r + m1 == alice_keypair.secret
-
-    # So goal now is to find m such that y_ = (g_)^m
-    # This will be done using the kangaroo-style attack (Problem 58).
-    # Once we have m, secret = m * r + n
