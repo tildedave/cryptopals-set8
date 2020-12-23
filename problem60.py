@@ -67,7 +67,11 @@ def find_twist_point_with_order(curve: MontgomeryCurve,
         if montgomery_point_test(curve, u):
             continue
 
-        return montgomery_ladder(curve, u, twist_order // q)
+        pt = montgomery_ladder(curve, u, twist_order // q)
+        if pt == 0:
+            continue
+
+        return pt
 
 
 def find_index(curve: MontgomeryCurve,
@@ -277,11 +281,40 @@ def test_map():
         given_point_order))
 
 
+def curve_kangaroo_attack(point: EllipticCurvePoint,
+                          m: int,
+                          r: int,
+                          ):
+    """
+    Return x so that x * r + m = secret.
+
+    Could return nothing since we run this for ±m.
+    """
+    # We do the attack on the equivalent weierstrass curve since operations
+    # with it are much faster :)
+    w_curve = WeierstrassCurve(p, -95051, 11279326)
+    g = m_point_to_w_curve(point)
+    assert g == (182, 85518893674295321206118380980485522083)
+
+    alice_public = m_point_to_w_curve(alice_keypair.public)
+    g_ = w_curve.scalar_mult(g, r)
+    invert_point = w_curve.invert_point(w_curve.scalar_mult(g, m))
+    y_ = w_curve.add_points(alice_public, invert_point)
+
+    x = kangaroo_attack(w_curve, g=g_, y=y_,
+                        a=0, b=(given_point_order - 1) // r)
+    # assert m, 'Should have returned a value'
+    if x:
+        print(f'Kangaroo attack - returned value {m} + {x} * {r}')
+    else:
+        print(f'Kangaroo attack - no x for which {m} + x * {r}')
+
+    # assert m * r + m1 == alice_keypair.secret
+    return x
+
+
 if __name__ == "__main__":
-    random.seed(0)
-
-    calculate_residues = False  # ~3 minutes or so
-
+    random.seed(1)
     point = (4, 85518893674295321206118380980485522083)
     dh = DiffieHelman(curve, point, point_order=given_point_order)
 
@@ -301,15 +334,15 @@ if __name__ == "__main__":
     # assert montgomery_ladder(curve, )
     print(f'{twist_order} (twist order)')
     print(f'{given_group_order} (curve group order)')
+    print(f'{alice_keypair.secret} (alice secret)')
 
-    if calculate_residues:
-        residues = subgroup_confinement_residues(curve, alice_keypair,
-                                                 twist_order)
-        residues_list = list(residues)
-    else:
-        residues_list = [
-            (4, 11), (46, 107), (15, 197), (721, 1621),
-            (36413, 105143), (140928, 405373), (3842, 2323367)]
+    # if calculate_residues:
+    residues = subgroup_confinement_residues(curve, alice_keypair, twist_order)
+    residues_list = list(residues)
+    # else:
+    #     residues_list = [
+    #         (4, 11), (46, 107), (15, 197), (721, 1621),
+    #         (36413, 105143), (140928, 405373), (3842, 2323367)]
 
     print(f'Residues: {residues_list}')
     option1, option2 = filter_moduli(curve, alice_keypair, twist_order,
@@ -330,19 +363,13 @@ if __name__ == "__main__":
 
     print(f'We know {alice_keypair.secret} = ±{m1} + m * {r}.  Solve for m')
 
-    # We do the attack on the equivalent weierstrass curve since operations
-    # with it are much faster :)
-    w_curve = WeierstrassCurve(p, -95051, 11279326)
-    g = m_point_to_w_curve(point)
-    assert g == (182, 85518893674295321206118380980485522083)
+    x1 = curve_kangaroo_attack(point, m1, r)
+    x2 = curve_kangaroo_attack(point, r - m1, r)
+    secret_possibilities = []
+    if x1:
+        secret_possibilities.append(x1 * r + m1)
+    if x2:
+        secret_possibilities.append(x2 * r + (r - m1))
 
-    alice_public = m_point_to_w_curve(alice_keypair.public)
-    g_ = w_curve.scalar_mult(g, r)
-    invert_point = w_curve.invert_point(w_curve.scalar_mult(g, m1))
-    y_ = w_curve.add_points(alice_public, invert_point)
-
-    m = kangaroo_attack(w_curve, g=g_, y=y_,
-                        a=0, b=(given_point_order - 1) // r)
-    assert m, 'Should have returned a value'
-    print(f'Kangaroo attacked returned value {m}')
-    assert m * r + m1 == alice_keypair.secret
+    assert alice_keypair.secret in secret_possibilities
+    print(f'Secret {alice_keypair.secret} was in {secret_possibilities}')
