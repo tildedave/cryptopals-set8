@@ -314,7 +314,6 @@ def curve_kangaroo_attack(point: EllipticCurvePoint,
 
 
 if __name__ == "__main__":
-    random.seed(1)
     point = (4, 85518893674295321206118380980485522083)
     dh = DiffieHelman(curve, point, point_order=given_point_order)
 
