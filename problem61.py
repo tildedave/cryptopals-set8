@@ -86,6 +86,11 @@ def test_eve_attack():
     G_ = curve.scalar_mult(R, t)
     Q_ = curve.scalar_mult(G_, eve_secret)
 
+    # Why does this work?
+    # G_ = (u1 + u2 * d')^{-1} * R
+    # Q_ = d' * (u1 + u2 * d')^{-1} * R
+    # u1 * G_ + u2 * Q_ = (u1 + d' * u2) * G_ = R
+
     attacker_config = ECDHConfig(curve, G_, config.n)
     assert attacker_config.is_valid()  # Validates point order of G'
     eve_keypair = ECDHKeypair(attacker_config, eve_secret, public=Q_)
