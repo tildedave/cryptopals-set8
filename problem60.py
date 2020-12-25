@@ -7,7 +7,7 @@ from typing import Iterator, Optional, Tuple, List, Union
 
 import pytest
 
-from diffie_helman import DiffieHelman, ECDHKeypair
+from diffie_hellman import DiffieHellman, ECDHKeypair
 from numtheory import crt_inductive, mod_sqrt, small_factors
 from elliptic_curve import (
     EllipticCurvePoint,
@@ -266,7 +266,7 @@ def test_map():
     w_curve = WeierstrassCurve(p, -95051, 11279326)
 
     point = (4, 85518893674295321206118380980485522083)
-    dh = DiffieHelman(curve, point, point_order=given_point_order)
+    dh = DiffieHellman(curve, point, point_order=given_point_order)
 
     expected = (182, 85518893674295321206118380980485522083)
     assert m_point_to_w_curve(point) == expected
@@ -315,7 +315,7 @@ def curve_kangaroo_attack(point: EllipticCurvePoint,
 
 if __name__ == "__main__":
     point = (4, 85518893674295321206118380980485522083)
-    dh = DiffieHelman(curve, point, point_order=given_point_order)
+    dh = DiffieHellman(curve, point, point_order=given_point_order)
 
     alice_keypair = dh.generate_keypair()
     bob_keypair = dh.generate_keypair()

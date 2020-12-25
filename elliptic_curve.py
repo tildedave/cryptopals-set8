@@ -22,6 +22,8 @@ class EllipticCurve:
     """
     Abstract class for typing
     """
+    prime: int
+
     def __contains__(self, p1: EllipticCurvePoint):
         raise NotImplementedError
 

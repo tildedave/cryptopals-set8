@@ -3,7 +3,7 @@ from typing import Tuple
 from functools import reduce
 from operator import itemgetter, mul
 
-from diffie_helman import DiffieHelman, ECDHKeypair
+from diffie_hellman import DiffieHellman, ECDHKeypair
 from elliptic_curve import (
     EllipticCurveIdentity,
     WeierstrassCurve,
@@ -46,7 +46,7 @@ def subgroup_confinement_residues(bob_keypair: ECDHKeypair,
 
 
 if __name__ == "__main__":
-    dh = DiffieHelman(given_curve, point, point_order=given_order)
+    dh = DiffieHellman(given_curve, point, point_order=given_order)
     alice_keypair = dh.generate_keypair()
     bob_keypair = dh.generate_keypair()
 
