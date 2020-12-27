@@ -1,7 +1,10 @@
-from random import randint
+from random import randint, randrange
 from typing import Generator, Tuple, List
 
+import gmpy2
 import pytest
+
+MAX_TRIES = 1_000
 
 
 def small_factors(j, max_factor=2**16) -> Generator[int, None, None]:
@@ -198,3 +201,15 @@ def test_kronecker_symbol():
     assert 1 == kronecker_symbol(2, 23)
     assert 1 == kronecker_symbol(36881633580730759730498811283302146613,
                                  233970423115425145524320034830162017933)
+
+
+def random_prime(e, range_start=2**120, range_end=2**121) -> int:
+    for _ in range(0, MAX_TRIES):
+        p = randrange(range_start, range_end)
+        if not gmpy2.is_prime(p):
+            continue
+
+        if (p - 1) % e != 0:
+            return p
+
+    raise ValueError(f'Could not find random prime with totient prime to {e}')
