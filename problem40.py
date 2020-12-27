@@ -1,8 +1,12 @@
 from binascii import unhexlify
+from itertools import combinations
+from math import gcd
+
+from gmpy2 import iroot, mpz
+
 from numtheory import crt_inductive, mod_inverse
 from rsa import RSAKeypair, rsa_encrypt
 
-from gmpy2 import iroot, mpz
 
 def test_crack_shared_cipher():
     ciphertext = 'Call me Ishmael.'
@@ -21,6 +25,8 @@ def test_crack_shared_cipher():
     m_s_0 = n1 * n2
     m_s_1 = n0 * n2
     m_s_2 = n0 * n1
+
+    assert all(gcd(n, n_) == 1 for n, n_ in combinations([n0, n1, n2], 2))
 
     result, _ = crt_inductive([
         (c0 * m_s_0 * mod_inverse(m_s_0, n0), keypair0.exponent),
