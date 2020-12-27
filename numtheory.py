@@ -74,16 +74,13 @@ def test_mod_sqrt():
     assert "not a quadratic residue" in str(excinfo.value)
 
 
-def mod_inverse(m: int, p: int):
-    if m == 0:
-        raise ValueError('Division by 0')
-
-    # This works for p = 3 but maybe not p = 2
-    return pow(m, p - 2, p)
+def mod_inverse(a, m):
+    return pow(a, -1, m)
 
 
 def test_mod_inverse():
     assert mod_inverse(5, 7) == 3
+    assert mod_inverse(17, 3120) == 2753
 
 
 def mod_divide(m: int, n: int, p: int):
@@ -93,7 +90,7 @@ def mod_divide(m: int, n: int, p: int):
     if n == 1:
         return m
 
-    return (m * mod_inverse(n, p)) % p
+    return (m * pow(n, p - 2, p)) % p
 
 
 def euclid_extended(a: int, b: int):
