@@ -1,6 +1,6 @@
 from math import isqrt
 from random import randint, randrange
-from typing import Generator, Tuple, List
+from typing import Generator, List, Optional, Tuple
 
 import gmpy2
 import pytest
@@ -204,14 +204,17 @@ def test_kronecker_symbol():
                                  233970423115425145524320034830162017933)
 
 
-def random_prime(e, range_start=2**120, range_end=2**121) -> int:
+def random_prime(e: Optional[int] = None,
+                 range_start=2**120,
+                 range_end=2**121,
+                 ) -> int:
     for _ in range(0, MAX_TRIES):
         p = randrange(range_start, range_end)
         if not gmpy2.is_prime(p):
             continue
 
-        if (p - 1) % e != 0:
-            return p
+        if not e or (p - 1) % e != 0:
+                return p
 
     raise ValueError(f'Could not find random prime with totient prime to {e}')
 
