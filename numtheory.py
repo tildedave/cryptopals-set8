@@ -1,3 +1,4 @@
+from math import isqrt
 from random import randint, randrange
 from typing import Generator, Tuple, List
 
@@ -213,3 +214,32 @@ def random_prime(e, range_start=2**120, range_end=2**121) -> int:
             return p
 
     raise ValueError(f'Could not find random prime with totient prime to {e}')
+
+
+def discrete_log(g: int, b: int, n: int, order_g=None):
+    """
+    Return a so that b = g^a mod n
+
+    This is Shanks "baby step, giant step" algorithm
+    """
+    if not order_g:
+        order_g = n
+    m = isqrt(order_g)
+    if m * m < order_g:
+        m += 1
+
+    table = {pow(g, m*j, n): j for j in range(0, m)}
+    inverse_g = pow(g, -1, n)
+    x = b
+
+    for i in range(0, m):
+        if x in table:
+            return m * table[x] + i
+        x = (x * inverse_g) % n
+    else:
+        raise ValueError('Discrete logarithm unsolvable')
+
+
+def test_discrete_log():
+    assert discrete_log(5, 20, 47) == 37
+    assert discrete_log(7, 8458730, 18989249) == 8912894
