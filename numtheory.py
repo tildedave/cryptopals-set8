@@ -327,13 +327,13 @@ def discrete_log(g: int, b: int, n: int, order_g=None):
     if m * m < order_g:
         m += 1
 
-    table = {pow(g, m*j, n): j for j in range(0, m)}
-    inverse_g = pow(g, -1, n)
+    table = {pow(g, j, n): j for j in range(m - 1, -1, -1)}
+    inverse_g = pow(g, -m, n)
     x = b
 
     for i in range(0, m):
         if x in table:
-            return m * table[x] + i
+            return i * m + table[x]
         x = (x * inverse_g) % n
     else:
         raise ValueError('Discrete logarithm unsolvable')
@@ -342,3 +342,56 @@ def discrete_log(g: int, b: int, n: int, order_g=None):
 def test_discrete_log():
     assert discrete_log(5, 20, 47) == 37
     assert discrete_log(7, 8458730, 18989249) == 8912894
+
+
+def pohlig_hellman_subgroup(g: int, h: int, r: int, e: int, p: int):
+    """
+    Solve the discrete log problem g^x = h mod p
+
+    g is the generator of a subgroup of prime power order r^e
+    """
+    def powers(ele, order):
+        for i in range(order):
+            yield pow(ele, i, p)
+
+    x_ = 0
+    gam = pow(g, pow(r, e - 1), p)
+    assert pow(gam, r, p) == 1  # Has order r (prime)
+
+    for k in range(0, e):
+        h_ = pow(pow(g, -x_, p) * h, pow(r, e - 1 - k), p)
+        d_ = discrete_log(gam, h_, p)
+        assert pow(gam, d_, p) == h_, 'Discrete log incorrect'
+        x_ = (x_ + pow(r, k, p) * d_) % p
+
+    return x_
+
+
+def pohlig_hellman(g: int, h: int, p: int):
+    residue_list = []
+    n = p - 1
+    assert pow(g, n, p) == 1
+
+    for r in small_factors(n):
+        e = prime_power_factor(n, r)
+        p_ = pow(r, e)
+
+        g_ = pow(g, n // p_, p)
+        assert pow(g_, p_, p) == 1
+        h_ = pow(h, n // p_, p)
+
+        # Subgroup of order p_ exists by Sylow theorems
+        x_ = pohlig_hellman_subgroup(g_, h_, r, e, p)
+        assert pow(g_, x_, p) == h_
+
+        residue_list.append((x_, p_))
+
+    x = crt_inductive(residue_list)[0]
+    assert pow(g, x, p) == h % p, 'Did not solve discrete logarithm correctly'
+    return x
+
+
+def test_pohlig_hellman():
+    assert pohlig_hellman_subgroup(5, 3, 2, 4, 2**4 + 1) == 13
+    assert pohlig_hellman_subgroup(5, 3, 2, 16, 2**16 + 1) == 27659
+    assert pohlig_hellman(6, 7531, 8101) == 6689

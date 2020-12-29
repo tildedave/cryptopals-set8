@@ -5,10 +5,10 @@ from diffie_hellman import DiffieHellman, ECDHConfig, ECDHKeypair
 from elliptic_curve import EllipticCurvePoint, WeierstrassCurve
 from numtheory import (
     crt_inductive,
-    discrete_log,
     is_primitive_root,
     mod_divide,
     mod_inverse,
+    pohlig_hellman,
     random_prime,
     random_smooth_prime,
     small_factors,
@@ -151,16 +151,10 @@ def test_eve_attack_rsa():
     assert p * q > alice_keypair.exponent
 
     # Now determine ep = e' mod p and eq = e' mod q using Pohlig-Hellman
-
-    print(f'We will use p = {p}, q = {q}.  s={sig.signature}')
     # s^e = pad(m) mod N
 
-    # So really these should involve using a more complicated discrete log
-    # solution that is factor-based (thus making choosing smooth primes
-    # valuable).  As it is I'm using numbers that are too low for it to really
-    # matter.
-    ep = discrete_log(sig.signature, h, p)
-    eq = discrete_log(sig.signature, h, q)
+    ep, _ = pohlig_hellman(sig.signature, h, p)
+    eq, _ = pohlig_hellman(sig.signature, h, q)
     assert pow(sig.signature, ep, p) == h % p, 'Did not solve correctly'
     assert pow(sig.signature, eq, q) == h % q, 'Did not solve correctly'
 
