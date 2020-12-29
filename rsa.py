@@ -10,8 +10,14 @@ class RSAKeypair(NamedTuple):
     exponent: int
 
     @staticmethod
-    def create(e: int) -> 'RSAKeypair':
-        p, q = random_prime(e), random_prime(e)
+    def create(e: int, range_start=None, range_end=None) -> 'RSAKeypair':
+        kwargs = {}
+        if range_start:
+            kwargs['range_start'] = range_start
+        if range_end:
+            kwargs['range_end'] = range_end
+
+        p, q = random_prime(e, **kwargs), random_prime(e, **kwargs)
         n = p * q
         et = (p - 1) * (q - 1)
         d = mod_inverse(e, et)
@@ -42,16 +48,16 @@ def hash_msg(msg: str):
     return int(hash_obj.hexdigest(), 16)
 
 
-def rsa_sign(msg: str, keypair: RSAKeypair) -> int:
+def rsa_sign(msg: str, keypair: RSAKeypair) -> RSASignature:
     # TODO - pad message
     h = hash_msg(msg) % keypair.exponent
     assert h < keypair.exponent
-    return RSASignature(msg, pow(h, keypair.public, keypair.exponent))
+    return RSASignature(msg, pow(h, keypair.secret, keypair.exponent))
 
 
 def rsa_verify(sig: RSASignature, keypair: RSAKeypair) -> bool:
     h = hash_msg(sig.message) % keypair.exponent
-    return pow(sig.signature, keypair.secret, keypair.exponent) == h
+    return pow(sig.signature, keypair.public, keypair.exponent) == h
 
 
 def test_create_keypair():

@@ -1,11 +1,20 @@
 import random
-from hashlib import sha256
 from typing import NamedTuple
 
-from elliptic_curve import EllipticCurvePoint, WeierstrassCurve
-from numtheory import mod_divide, mod_inverse
-
 from diffie_hellman import DiffieHellman, ECDHConfig, ECDHKeypair
+from elliptic_curve import EllipticCurvePoint, WeierstrassCurve
+from numtheory import (
+    crt_inductive,
+    discrete_log,
+    is_primitive_root,
+    mod_divide,
+    mod_inverse,
+    random_prime,
+    random_smooth_prime,
+    small_factors,
+)
+from rsa import RSAKeypair, rsa_sign, hash_msg, rsa_verify
+
 
 SIGN_MSG = """Call me Ishmael. Some years ago - never mind how long precisely -
 having little or no money in my purse, and nothing particular to interest me on
@@ -25,11 +34,6 @@ def create_dh() -> DiffieHellman:
 class ECDSASignature(NamedTuple):
     point_x: int
     hash: int
-
-
-def hash_msg(msg: str):
-    hash_obj = sha256(msg.encode('utf-8'))
-    return int(hash_obj.hexdigest(), 16)
 
 
 def ecdsa_sign(msg: str, keypair: ECDHKeypair):
@@ -62,8 +66,6 @@ def test_sign_and_verify():
 
 
 def test_eve_attack():
-    random.seed(0)
-
     dh = create_dh()
     alice_keypair = dh.generate_keypair()
     assert alice_keypair.is_valid()
@@ -97,3 +99,74 @@ def test_eve_attack():
     assert eve_keypair.is_valid()  # Validates the public key matches secret
 
     assert ecdsa_verify(SIGN_MSG, sig, eve_keypair), 'Should have verified'
+
+
+def test_eve_attack_rsa():
+    random.seed(0)
+
+    kwargs = dict(range_start=2**20, range_end=2**21)
+    e = random_prime(**kwargs)
+    alice_keypair = RSAKeypair.create(e, **kwargs)
+    sig = rsa_sign(SIGN_MSG, alice_keypair)
+
+    assert rsa_verify(sig, alice_keypair)
+    # We will now create a keypair that also verifies this signature
+
+    # 1) find p
+    #   a) p - 1 needs to be smooth (all small factors).
+    #   b) s and pad(m) need to be in the same subgroups.  Text suggests
+    #      ensuring both are primitive roots.
+
+    MAX_TRIES = 1_000
+    h = hash_msg(SIGN_MSG)
+    p = None
+    for _ in range(0, MAX_TRIES):
+        p = random_smooth_prime(**kwargs)
+        if is_primitive_root(sig.signature, p) and is_primitive_root(h, p):
+            break
+    else:
+        assert False, f'Unable to find suitable prime {p}'
+
+    p_group_factors = filter(lambda x: x != 2, list(small_factors(p - 1)))
+    q = None
+
+    # We now need a random prime so that p * q > exponent
+    for _ in range(0, MAX_TRIES):
+        q = random_smooth_prime(range_start=kwargs['range_start'] * 16,
+                                range_end=kwargs['range_end'] * 32)
+
+        if not is_primitive_root(sig.signature, q):
+            continue
+
+        if not is_primitive_root(h, q):
+            continue
+
+        # Then just ensure that q - 1 shares no factors with p
+        for f in p_group_factors:
+            if q - 1 % f  == 0:
+                continue
+
+        break
+
+    assert p * q > alice_keypair.exponent
+
+    # Now determine ep = e' mod p and eq = e' mod q using Pohlig-Hellman
+
+    print(f'We will use p = {p}, q = {q}.  s={sig.signature}')
+    # s^e = pad(m) mod N
+
+    # So really these should involve using a more complicated discrete log
+    # solution that is factor-based (thus making choosing smooth primes
+    # valuable).  As it is I'm using numbers that are too low for it to really
+    # matter.
+    ep = discrete_log(sig.signature, h, p)
+    eq = discrete_log(sig.signature, h, q)
+    assert pow(sig.signature, ep, p) == h % p, 'Did not solve correctly'
+    assert pow(sig.signature, eq, q) == h % q, 'Did not solve correctly'
+
+    e_, _ = crt_inductive([(ep, p - 1), (eq, q - 1)])
+    assert pow(sig.signature, e_, (p * q)) == h % (p * q)
+
+    d = mod_inverse(e_, p * q)
+    eve_keypair = RSAKeypair(e_, d, p * q)
+    assert rsa_verify(sig, eve_keypair)

@@ -1,11 +1,35 @@
-from math import isqrt
+from math import isqrt, prod, gcd
 from random import randint, randrange
-from typing import Generator, List, Optional, Tuple
+from typing import Callable, Generator, List, Optional, Tuple
 
 import gmpy2
 import pytest
 
 MAX_TRIES = 1_000
+
+
+# g is some polynomial, we'll just hardcode it to x^2 + 1 mod n
+def pollard_rho(n, g: Optional[Callable[[int], int]]=None) -> Optional[int]:
+    if not g:
+        g = lambda x: (x * x + 1) % n
+
+    x = 2
+    y = 2
+    d = 1
+    while d == 1:
+        x = g(x)
+        y = g(g(y))
+        d = gcd(abs(x - y), n)
+
+    if d == n:
+        return None
+
+    return d
+
+
+def test_pollard_rho():
+    assert pollard_rho(53) == None
+    assert pollard_rho(26) in [2, 13]
 
 
 def small_factors(j, max_factor=2**16) -> Generator[int, None, None]:
@@ -126,12 +150,20 @@ def crt_inductive(residue_list: List[Tuple[int, int]]):
     x, m = residue_list[0]
     for x_, m_ in residue_list[1:]:
         u, v, d = euclid_extended(m, m_)
-        assert d == 1, 'Residues were not co-prime'
-        x = u * m * x_ + v * m_ * x
+        if x % d != x_ % d:
+            raise ValueError('No unique solution')
+        x = (x * v * m_ + x_ * u * m) // d
         m = m * m_
         x = x % m
 
     return x, m
+
+
+def test_crt_inductive():
+    assert crt_inductive([(0, 3), (3, 4), (4, 5)]) == (39, 60)
+    with pytest.raises(ValueError):
+        crt_inductive([(2, 4), (1, 6)])
+    assert crt_inductive([(2, 4), (0, 6)]) == (6, 24)
 
 
 def kronecker_symbol(a: int, b: int):
@@ -217,6 +249,70 @@ def random_prime(e: Optional[int] = None,
                 return p
 
     raise ValueError(f'Could not find random prime with totient prime to {e}')
+
+
+def random_smooth_prime(b=2**16, range_start=None, range_end=None):
+    for _ in range(0, MAX_TRIES):
+        kwargs = {'range_start': b, 'range_end': b * 2}
+        if range_start:
+            kwargs['range_start'] = range_start
+        if range_end:
+            kwargs['range_end'] = range_end
+
+        p = random_prime(**kwargs)
+
+        # This is pretty inefficient but should be fine since we don't need p
+        # to be that large
+        start = p - 1
+        factors = list(small_factors(p - 1, max_factor=range_end or b * 2))
+        for f in factors:
+            while start % f == 0:
+                start //= f
+
+        if start == 1:
+            return p
+
+    raise ValueError(f'Could not find smooth prime')
+
+
+def is_primitive_root(g: int, p: int) -> bool:
+    factors = list(small_factors(p - 1, max_factor=p))
+    # Ensure factor list is comprehensive
+    start = p - 1
+    for f in factors:
+        while start % f == 0:
+            start //= f
+    assert start == 1
+
+    for f in factors:
+        if pow(g, (p - 1) // f, p) == 1:
+            return False
+
+    return True
+
+
+def test_random_smooth_prime():
+    assert random_smooth_prime() > 0
+
+
+def test_is_primitive_root():
+    assert is_primitive_root(5, 23)
+    assert is_primitive_root(3, 34)
+    assert is_primitive_root(6, 23) == False
+    assert is_primitive_root(2, 83477)
+
+
+def prime_power_factor(n: int, p: int) -> int:
+    x = 0
+    while n % p == 0:
+        x += 1
+        n = n // p
+
+    return x
+
+
+def test_prime_power_factor():
+    assert prime_power_factor(8, 2) == 3
 
 
 def discrete_log(g: int, b: int, n: int, order_g=None):
