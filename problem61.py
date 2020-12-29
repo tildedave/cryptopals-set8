@@ -102,9 +102,7 @@ def test_eve_attack():
 
 
 def test_eve_attack_rsa():
-    random.seed(0)
-
-    kwargs = dict(range_start=2**20, range_end=2**21)
+    kwargs = dict(range_start=2**120, range_end=2**121)
     e = random_prime(**kwargs)
     alice_keypair = RSAKeypair.create(e, **kwargs)
     sig = rsa_sign(SIGN_MSG, alice_keypair)
@@ -153,8 +151,8 @@ def test_eve_attack_rsa():
     # Now determine ep = e' mod p and eq = e' mod q using Pohlig-Hellman
     # s^e = pad(m) mod N
 
-    ep, _ = pohlig_hellman(sig.signature, h, p)
-    eq, _ = pohlig_hellman(sig.signature, h, q)
+    ep = pohlig_hellman(sig.signature, h, p)
+    eq = pohlig_hellman(sig.signature, h, q)
     assert pow(sig.signature, ep, p) == h % p, 'Did not solve correctly'
     assert pow(sig.signature, eq, q) == h % q, 'Did not solve correctly'
 
@@ -164,3 +162,7 @@ def test_eve_attack_rsa():
     d = mod_inverse(e_, p * q)
     eve_keypair = RSAKeypair(e_, d, p * q)
     assert rsa_verify(sig, eve_keypair)
+
+
+if __name__ == '__main__':
+    test_eve_attack()

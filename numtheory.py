@@ -1,4 +1,5 @@
 from math import isqrt, prod, gcd
+import random
 from random import randint, randrange
 from typing import Callable, Generator, List, Optional, Tuple
 
@@ -6,6 +7,7 @@ import gmpy2
 import pytest
 
 MAX_TRIES = 1_000
+SMALL_PRIMES = [p for p in range(0, 2**16) if gmpy2.is_prime(p)]
 
 
 # g is some polynomial, we'll just hardcode it to x^2 + 1 mod n
@@ -252,24 +254,21 @@ def random_prime(e: Optional[int] = None,
 
 
 def random_smooth_prime(b=2**16, range_start=None, range_end=None):
+    # Goal is to generate a prime in range_start / range_end
+    if not range_start:
+        range_start = b
+    if not range_end:
+        range_end = b * 2
+
+
     for _ in range(0, MAX_TRIES):
-        kwargs = {'range_start': b, 'range_end': b * 2}
-        if range_start:
-            kwargs['range_start'] = range_start
-        if range_end:
-            kwargs['range_end'] = range_end
+        p = 2  # Forces p + 1 odd
+        while p < range_start:
+            p *= random.choice(SMALL_PRIMES)
+        p += 1
+        # p coprime to 2 + all random prime factors
 
-        p = random_prime(**kwargs)
-
-        # This is pretty inefficient but should be fine since we don't need p
-        # to be that large
-        start = p - 1
-        factors = list(small_factors(p - 1, max_factor=range_end or b * 2))
-        for f in factors:
-            while start % f == 0:
-                start //= f
-
-        if start == 1:
+        if gmpy2.is_prime(p):
             return p
 
     raise ValueError(f'Could not find smooth prime')
@@ -360,7 +359,7 @@ def pohlig_hellman_subgroup(g: int, h: int, r: int, e: int, p: int):
 
     for k in range(0, e):
         h_ = pow(pow(g, -x_, p) * h, pow(r, e - 1 - k), p)
-        d_ = discrete_log(gam, h_, p)
+        d_ = discrete_log(gam, h_, p, order_g=r)
         assert pow(gam, d_, p) == h_, 'Discrete log incorrect'
         x_ = (x_ + pow(r, k, p) * d_) % p
 
