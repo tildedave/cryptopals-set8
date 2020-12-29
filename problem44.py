@@ -69,13 +69,16 @@ def test_find_repeated_nonce():
     # This is just a brute force attack
     for sig1, sig2 in combinations(map(itemgetter(0), SIGNATURES), 2):
         assert sig1 != sig2
-        s_inv = mod_inverse(sig1.s - sig2.s, q)
-        k = ((hash_msg(sig1.msg) - hash_msg(sig2.msg)) * s_inv) % q
-        attack_keypair = get_attack_keypair(sig1.msg, sig1, y, k)
-        attack_sig = dsa_sign(sig1.msg, attack_keypair, k)
-        if attack_sig == sig1:
-            secret_str = '{:02x}'.format(attack_keypair.private)
-            hash_obj = sha1(secret_str.encode('utf-8'))
-            digest = hash_obj.hexdigest()
-            assert digest == 'ca8f6f7c66fa362d40760d135b763eb8527d3d52'
+        # r = g^k % p % q so if k is repeated so is r
+        if sig1.r == sig2.r:
             break
+
+    s_inv = mod_inverse(sig1.s - sig2.s, q)
+    k = ((hash_msg(sig1.msg) - hash_msg(sig2.msg)) * s_inv) % q
+    attack_keypair = get_attack_keypair(sig1.msg, sig1, y, k)
+    assert dsa_sign(sig1.msg, attack_keypair, k) == sig1
+    assert dsa_sign(sig2.msg, attack_keypair, k) == sig2
+    secret_str = '{:02x}'.format(attack_keypair.private)
+    hash_obj = sha1(secret_str.encode('utf-8'))
+    digest = hash_obj.hexdigest()
+    assert digest == 'ca8f6f7c66fa362d40760d135b763eb8527d3d52'
