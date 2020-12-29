@@ -19,6 +19,16 @@ So be friendly, a matter of life and death, just like a etch-a-sketch
 """
 
 
+def test_hash():
+    assert hash_msg(SIGN_MSG) == 0xd2d0714f014a9784047eaeccf956520045c45265
+
+
+def get_attack_keypair(msg, sig, y, k):
+    r_inv = mod_inverse(sig.r, q)
+    x = ((sig.s * k - hash_msg(msg)) * r_inv) % q
+    return DSAKeypair(y, x, g, p, q)
+
+
 def test_dsa_attack():
     x = randint(1, q)
     y = pow(g, x, p)
@@ -30,13 +40,6 @@ def test_dsa_attack():
     assert attack_keypair.private == x
 
     dsa_sign(SIGN_MSG, attack_keypair, k=k)
-
-
-
-def get_attack_keypair(msg, sig, y, k):
-    r_inv = mod_inverse(sig.r, q)
-    x = ((sig.s * k - hash_msg(msg)) * r_inv) % q
-    return DSAKeypair(y, x, g, p, q)
 
 
 def test_recover_keypair():
