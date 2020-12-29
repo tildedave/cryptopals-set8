@@ -1,5 +1,4 @@
 import random
-from typing import NamedTuple
 
 from diffie_hellman import DiffieHellman, ECDHConfig, ECDHKeypair
 from elliptic_curve import WeierstrassCurve
