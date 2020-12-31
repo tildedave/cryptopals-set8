@@ -96,37 +96,82 @@ def test_graham_schmidt():
 
 def lll_reduction(b: List[Vector], delta: Fraction=Fraction(99, 100)):
     b = copy(b)
-    q = graham_schmidt(b)
+    q = [None] * len(b)
+    B = [None] * len(b)
 
-    def mu(i: int, j: int) -> Scalar:
-        v = b[i]
-        u = q[j]
-        ret = Fraction(inner_product(v, u), inner_product(u, u))
-        return ret
+    q[0] = b[0]  # Orthogonal basis
+    B[0] = inner_product(q[0], q[0])  # Length of orthogonal basis vectors
 
     n = len(b)
     k = 1
+    k_max = 0
+    mu = {}  # Projection of v onto u
 
     while k < n:
-        print('k', k, n)
-        for j in range(k - 1, -1, -1):
-            m = mu(k, j)
-            if abs(m) > Fraction(1, 2):
-                b[k] = vec_subtract(b[k], scalar_product(b[j], round(m)))
-                q = graham_schmidt(b)
+        # 2.6.3 LLL - Step 2 - Incremental Graham-Schmidt
+        if k > k_max:
+            k_max = k
+            q[k] = b[k]
+            for j in range(k):
+                mu[(k, j)] = Fraction(inner_product(b[k], q[j]), B[j])
+                q[k] = vec_subtract(q[k], scalar_product(q[j], mu[(k, j)]))
+            B[k] = inner_product(q[k], q[k])
 
-        threshold = (delta - mu(k, k - 1)**2) * inner_product(q[k -1], q[k - 1])
-        if inner_product(q[k], q[k]) >= threshold:
-            k += 1
-        else:
+        # 2.6.3 LLL - Sub-algorithm RED
+        def reduce_basis(k, l):
+            m = mu[(k, l)]
+            if abs(m) <= Fraction(1, 2):
+                return
+
+            b[k] = vec_subtract(b[k], scalar_product(b[l], round(m)))
+            mu[(k, l)] -= round(m)
+            for i in range(0, l):
+                mu[(k, i)] -= round(m) * mu[(l, i)]
+
+        # 2.6.3 LLL - Sub-algorithm SWAP
+        def swap(k):
             b[k], b[k - 1] = b[k - 1], b[k]
-            q = graham_schmidt(b)
-            k = max(k - 1, 1)
+            for j in range(k - 2, -1, -1):
+                mu[(k, j)], mu[(k - 1, j)] = mu[(k - 1, j)], mu[(k, j)]
+
+            m = mu[(k, k - 1)]
+            B_ = B[k] + m**2 * B[k - 1]
+            mu[(k, k - 1)] = Fraction(m * B[k - 1], B_)
+
+            b_ = q[k - 1]
+            # b^{*}_{k - 1} = b^{*}_{k} + \mu b
+            q[k - 1] = vec_sum([q[k], scalar_product(b_, m)])
+            q[k] = vec_sum([
+                scalar_product(q[k], -mu[(k, k - 1)]),
+                scalar_product(b_, Fraction(B[k], B_))
+            ])
+            B[k] = Fraction(B[k - 1] * B[k], B_)
+            B[k - 1] = B_
+
+            for i in range(k + 1, k_max + 1):
+                t = mu[(i, k)]
+                mu[(i, k)] = mu[(i, k - 1)] - m * t
+                mu[(i, k - 1)] = t + mu[(k, k - 1)] * mu[(i, k)]
+
+        # 2.6.3 LLL - Step 3
+        while True:
+            reduce_basis(k, k - 1)
+            if B[k] < (delta - mu[(k, k - 1)]**2) * B[k - 1]:
+                # 2.6.3 LLL - Sub-algorithm SWAP
+                swap(k)
+                k = max(1, k - 1)
+                # Go to step 3 (repeat loop)
+            else:
+                for l in range(k - 2, -1, -1):
+                    reduce_basis(k, l)
+                k += 1
+                # Go to step 4 (break loop)
+                break
 
     return b
 
 
-def test_lll_reduction():
+def test_lll_reduction_works():
     test_basis = [
         [  -2,    0,    2,    0],
         [ Fraction(1, 2),   -1,    0,    0],
@@ -190,6 +235,9 @@ def test_lll_against_biased_nonce_attack():
     basis.append(list(map(itemgetter(1), attacker_pairs)) + [ct, 0])
     basis.append(list(map(itemgetter(0), attacker_pairs)) + [0, cu])
 
-    print(lll_reduction(basis))
-    print('secret key', alice_keypair)
-    print('looking for', cu)
+    reduction = lll_reduction(basis)
+    candidate_rows = [v for v in reduction if v[dim - 1] == cu]
+
+    candidate_keys = [-1 * v[dim - 2] * 2**l for v in candidate_rows]
+    assert alice_keypair.secret in candidate_keys, \
+        f'Should have seen {alice_keypair.secret} in {candidate_keys}'
