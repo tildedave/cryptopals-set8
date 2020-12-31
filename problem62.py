@@ -66,7 +66,7 @@ def vec_subtract(vec: Vector, *vecs: Vector):
 def graham_schmidt(b: List[Vector]) -> List[Vector]:
     q = [Fraction(0)] * len(b)
     for i, v in enumerate(b):
-        sum_list = [[Fraction(0)] * len(b)] + [proj(u, v) for u in q[:i]]
+        sum_list = [[Fraction(0)] * len(v)] + [proj(u, v) for u in q[:i]]
         q[i] = vec_subtract(v, vec_sum(sum_list))
 
     return q
@@ -125,3 +125,17 @@ def test_lll_reduction():
     ]
 
     assert lll_reduction(test_basis) == expected_result
+
+
+def test_lll_reduction_minimum_polynomial():
+    # this is sqrt(2) + sqrt(3)
+    # approximations in the ith row is precision * alpha^{i}
+    test_basis = [
+        [1, 0, 0, 0, 0, 10000],
+        [0, 1, 0, 0, 0, 31462],
+        [0, 0, 1, 0, 0, 98989],
+        [0, 0, 0, 1, 0, 311448],
+        [0, 0, 0, 0, 1, 979897]
+    ]
+    # corresponds with sqrt(2) + sqrt(3) minpoly being x^4 - 10x^2 + 1
+    assert lll_reduction(test_basis)[0][0:4] == [1, 0, -10, 0, 1]
