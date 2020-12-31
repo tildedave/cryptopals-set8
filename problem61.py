@@ -50,8 +50,8 @@ def test_eve_attack():
 
     curve = config.curve
     eve_secret = random.randint(1, config.n)
-    u1 = mod_divide(hash_msg(SIGN_MSG), sig.hash, config.n)
-    u2 = mod_divide(sig.point_x, sig.hash, config.n)
+    u1 = mod_divide(hash_msg(SIGN_MSG), sig.s, config.n)
+    u2 = mod_divide(sig.r, sig.s, config.n)
     R = curve.add_points(
         config.scalar_mult_point(u1),
         curve.scalar_mult(alice_keypair.public, u2))

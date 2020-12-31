@@ -6,8 +6,8 @@ from numtheory import mod_divide
 from rsa import hash_msg
 
 class ECDSASignature(NamedTuple):
-    point_x: int
-    hash: int
+    r: int
+    s: int
 
 
 def ecdsa_sign(msg: str, keypair: ECDHKeypair):
@@ -16,16 +16,16 @@ def ecdsa_sign(msg: str, keypair: ECDHKeypair):
     r = keypair.config.scalar_mult_point(k)[0]
     s = mod_divide(hash_msg(msg) + keypair.secret * r, k, n)
 
-    return ECDSASignature(r, hash=s)
+    return ECDSASignature(r, s)
 
 
 def ecdsa_verify(msg: str, sig: ECDSASignature, keypair: ECDHKeypair):
     curve = keypair.config.curve
     n = keypair.config.n
-    u1 = mod_divide(hash_msg(msg), sig.hash, n)
-    u2 = mod_divide(sig.point_x, sig.hash, n)
+    u1 = mod_divide(hash_msg(msg), sig.s, n)
+    u2 = mod_divide(sig.r, sig.s, n)
     R = curve.add_points(
         keypair.config.scalar_mult_point(u1),
         curve.scalar_mult(keypair.public, u2))
 
-    return R[0] == sig.point_x
+    return R[0] == sig.r

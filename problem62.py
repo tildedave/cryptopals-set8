@@ -1,8 +1,23 @@
 from copy import copy
 from fractions import Fraction
-from typing import List, Union, Iterable
+from operator import itemgetter
+import random
+import string
+from typing import Iterable, List, Tuple, Union
 
-from ecdsa import ECDHKeypair, ECDSASignature
+from diffie_hellman import DiffieHellman
+from ecdsa import ECDHKeypair, ECDSASignature, hash_msg
+from elliptic_curve import WeierstrassCurve
+from numtheory import mod_divide, mod_inverse
+
+
+def create_dh() -> DiffieHellman:
+    p = 233970423115425145524320034830162017933
+    curve = WeierstrassCurve(p, -95051, 11279326)
+    point = (182, 85518893674295321206118380980485522083)
+    point_order = 29246302889428143187362802287225875743
+
+    return DiffieHellman(curve, point, point_order)
 
 
 def ecdsa_sign_biased(msg: str, keypair: ECDHKeypair):
@@ -12,7 +27,7 @@ def ecdsa_sign_biased(msg: str, keypair: ECDHKeypair):
     r = keypair.config.scalar_mult_point(k)[0]
     s = mod_divide(hash_msg(msg) + keypair.secret * r, k, n)
 
-    return ECDSASignature(r, hash=s)
+    return ECDSASignature(r, s)
 
 
 Scalar = Union[int, Fraction, float]
@@ -93,6 +108,7 @@ def lll_reduction(b: List[Vector], delta: Fraction=Fraction(99, 100)):
     k = 1
 
     while k < n:
+        print('k', k, n)
         for j in range(k - 1, -1, -1):
             m = mu(k, j)
             if abs(m) > Fraction(1, 2):
@@ -138,4 +154,42 @@ def test_lll_reduction_minimum_polynomial():
         [0, 0, 0, 0, 1, 979897]
     ]
     # corresponds with sqrt(2) + sqrt(3) minpoly being x^4 - 10x^2 + 1
-    assert lll_reduction(test_basis)[0][0:4] == [1, 0, -10, 0, 1]
+    assert lll_reduction(test_basis)[0][0:5] == [1, 0, -10, 0, 1]
+
+
+def test_lll_against_biased_nonce_attack():
+    dh = create_dh()
+    chars = string.ascii_lowercase + string.digits
+    alice_keypair = dh.generate_keypair()
+
+    num_signatures = 30
+    message_length = 40
+    l = 8  # Number of biased bits
+    q = dh.config.n
+
+    attacker_pairs : List[Tuple[int, int]] = []
+    for _ in range(num_signatures):
+        msg = ''.join(random.choices(chars, k=message_length))
+        sig = ecdsa_sign_biased(msg, alice_keypair)
+
+        r, s = sig.r, sig.s
+
+        t = mod_divide(r, s * 2**l, q)
+        u = mod_divide(hash_msg(msg), (-s * 2**l), q)
+        attacker_pairs.append((u, t))
+
+    ct = Fraction(1, 2**l)
+    cu = Fraction(q, 2**l)
+    dim = len(attacker_pairs) + 2
+    basis = []
+    for i in range(len(attacker_pairs)):
+        vec = [0] * dim
+        vec[i] = q
+        basis.append(vec)
+
+    basis.append(list(map(itemgetter(1), attacker_pairs)) + [ct, 0])
+    basis.append(list(map(itemgetter(0), attacker_pairs)) + [0, cu])
+
+    print(lll_reduction(basis))
+    print('secret key', alice_keypair)
+    print('looking for', cu)
