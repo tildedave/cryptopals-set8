@@ -19,6 +19,7 @@ and desire, she had been comparing him in her mind with another."""
 FieldElement = int  # Element of GF(2^128)
 FieldPolynomial = List[FieldElement]  # Smallest degree up to largest degree
 ZeroPolynomial: FieldPolynomial = []
+OnePolynomial: FieldPolynomial = [1]
 
 
 def element_add(p1: FieldElement, p2: FieldElement):
@@ -164,6 +165,9 @@ def polynomial_divmod(a: FieldPolynomial,
     """
     b = polynomial_trim(b)  # Makes determining the leading coefficient easier
 
+    if b == ZeroPolynomial:
+        raise ValueError('Division by zero')
+
     d1 = polynomial_degree(a)
     d2 = polynomial_degree(b)
 
@@ -193,7 +197,7 @@ def polynomial_egcd(a: FieldPolynomial, b: FieldPolynomial):
     b = polynomial_trim(b)
 
     if a == ZeroPolynomial:
-        return (b, ZeroPolynomial, [1])
+        return (b, ZeroPolynomial, OnePolynomial)
     else:
         q, r = polynomial_divmod(b, a)
         # so now q * b + r == a
@@ -204,7 +208,7 @@ def polynomial_egcd(a: FieldPolynomial, b: FieldPolynomial):
 
 
 def polynomial_exp(a: FieldPolynomial, n: int) -> FieldPolynomial:
-    p = [1]
+    p = OnePolynomial
     while n > 0:
         if n % 2 == 1:
             p = polynomial_mult(p, a)
@@ -212,6 +216,37 @@ def polynomial_exp(a: FieldPolynomial, n: int) -> FieldPolynomial:
         n = n // 2
 
     return p
+
+
+def polynomial_make_monic(a: FieldPolynomial):
+    a = polynomial_trim(a)
+    if a == ZeroPolynomial:
+        return a
+
+    return polynomial_trim(polynomial_scalar_mult(a, a[-1]))
+
+
+def polynomial_derivative(a: FieldPolynomial):
+    # Derivative of a_0 + a_1 x + a_2 x^2 + ... = a_1 + a_3 x^2 + ...
+    d = [0] * polynomial_degree(a)
+    for i in range(0, len(d)):
+        if i % 2 == 1:
+            continue
+        d[i] = a[i + 1]
+
+    return polynomial_trim(d)
+
+
+def polynomial_remove_square_factors(a: FieldPolynomial):
+    while True:
+        d = polynomial_derivative(a)
+        g, _, _ = polynomial_egcd(a, d)
+        if g == OnePolynomial:
+            return a
+
+        q, r = polynomial_divmod(a, g)
+        assert r == ZeroPolynomial
+        a = q
 
 
 def test_polynomial_add():
@@ -243,11 +278,25 @@ def test_polynomial_egcd():
     g, u, v = polynomial_egcd(a, b)
     assert g == [1, 1]  # x + 1
     assert g == polynomial_add(polynomial_mult(u, a), polynomial_mult(v, b))
+    assert polynomial_egcd(a, ZeroPolynomial) == (a, [1], ZeroPolynomial)
+    assert polynomial_egcd(ZeroPolynomial, a) == (a, ZeroPolynomial, [1])
 
 
 def test_polynomial_exp():
     a = [1, 0, 1]  # x^2 + 1
     assert polynomial_exp(a, 5) == [1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1]
+
+
+def test_polynomial_derivative():
+    # Derivative of x^4 + x^3 + x^2 + x + 1 = 3x^2 + 1 = x^2 + 1
+    assert polynomial_derivative([1, 1, 1, 1, 1]) == [1, 0, 1]
+
+
+def test_polynomial_remove_square_factors():
+    p1 = [1, 1, 0, 0, 1, 1]  # x^5+x^4+x+1 = (x+1)^5
+    assert polynomial_remove_square_factors([1, 1, 0, 0, 1, 1]) == [1, 1]
+    p2 = [1, 0, 0, 1, 1, 0, 0, 1]  # x^7+x^4+x^3+1 = (x^2+1)^2 * (x^3+1)
+    assert polynomial_remove_square_factors(p2) == [1, 0, 0, 1]
 
 
 def element_divmod(a: FieldElement,
@@ -409,7 +458,7 @@ def gcm_encrypt(plaintext: bytes,
     associated_bitlen = (associated_length * 8).to_bytes(8, byteorder='big')
     cipher_bitlen = (plaintext_length * 8).to_bytes(8, byteorder='big')
     length_block = associated_bitlen + cipher_bitlen
-    print('length', length_block, plaintext_length)
+
     assert len(length_block) == bytes_per_block
     # MAC Calculation
     t = gcm_mac(ciphertext, associated_data, length_block, aes_key, nonce)
@@ -511,13 +560,16 @@ def test_gcm_encryption_with_associated_data():
     associated_data = ASSOCIATED_MSG.encode()
     ct, t = gcm_encrypt(plaintext, associated_data, aes_key, nonce)
     result, valid = gcm_decrypt(ct, associated_data, aes_key, nonce, t)
-    print(result)
+
+    assert result == plaintext
     assert valid
 
 
 def test_gcm_encryption_single_block():
     aes_key = 's' * 32
     nonce = b'\0' * 12
-    ct, t = gcm_encrypt(b'a' * (128 // 8), bytes(0), aes_key, nonce)
+    plaintext = b'a' * (128 // 8)
+    ct, t = gcm_encrypt(plaintext, bytes(0), aes_key, nonce)
     result, valid = gcm_decrypt(ct, bytes(0), aes_key, nonce, t)
+    assert result == plaintext
     assert valid
