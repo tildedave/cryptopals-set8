@@ -16,27 +16,27 @@ been full of memories of their secret life together, full of tenderness and joy
 and desire, she had been comparing him in her mind with another."""
 
 
-GF2Polynomial = int
+FieldElement = int  # Element of GF(2^128)
 
 
-def polynomial_add(p1: GF2Polynomial, p2: GF2Polynomial):
+def element_add(p1: FieldElement, p2: FieldElement):
     return p1 ^ p2
 
 
 # GF2 is weird
-polynomial_subtract = polynomial_add
+element_subtract = element_add
 
 
-def polynomial_degree(p1: GF2Polynomial):
+def element_degree(p1: FieldElement):
     return p1.bit_length() - 1
 
 
-def polynomial_string(p: GF2Polynomial):
+def element_string(p: FieldElement):
     if p == 0:
         return '0'
 
     s = []
-    for i in range(0, polynomial_degree(p) + 1):
+    for i in range(0, element_degree(p) + 1):
         s.append(p & 1)
         p >>= 1
 
@@ -53,10 +53,10 @@ def polynomial_string(p: GF2Polynomial):
     return ' + '.join(parts)
 
 
-def polynomial_mult(a: GF2Polynomial,
-                    b: GF2Polynomial,
-                    mod: Optional[GF2Polynomial] = None,
-                    ) -> GF2Polynomial:
+def element_mult(a: FieldElement,
+                 b: FieldElement,
+                 mod: Optional[FieldElement] = None,
+                 ) -> FieldElement:
     p = 0
     while a > 0:
         if a & 1:
@@ -64,116 +64,116 @@ def polynomial_mult(a: GF2Polynomial,
         a >>= 1
         b <<= 1
 
-        if mod is not None and polynomial_degree(b) == polynomial_degree(mod):
+        if mod is not None and element_degree(b) == element_degree(mod):
             b ^= mod
 
     return p
 
 
-def polynomial_divmod(a: GF2Polynomial,
-                      b: GF2Polynomial,
-                      ) -> Tuple[GF2Polynomial, GF2Polynomial]:
+def element_divmod(a: FieldElement,
+                   b: FieldElement,
+                   ) -> Tuple[FieldElement, FieldElement]:
     """
     Returns (a // b, a % b)
     """
     q, r = 0, a
 
-    while polynomial_degree(r) >= polynomial_degree(b):
-        d = polynomial_degree(r) - polynomial_degree(b)
+    while element_degree(r) >= element_degree(b):
+        d = element_degree(r) - element_degree(b)
         q = q ^ (1 << d)
         r = r ^ (b << d)
 
     return q, r
 
 
-def polynomial_egcd(a: GF2Polynomial,
-                    b: GF2Polynomial,
-                    mod: Optional[GF2Polynomial] = None):
+def element_egcd(a: FieldElement,
+                 b: FieldElement,
+                 mod: Optional[FieldElement] = None):
     """
     Return (d, u, v) so that a * u + b * v = d
     """
     if a == 0:
         return (b, 0, 1)
     else:
-        q, r = polynomial_divmod(b, a)
+        q, r = element_divmod(b, a)
         # so now q * b + r == a
-        assert polynomial_add(polynomial_mult(q, a), r) == b
+        assert element_add(element_mult(q, a), r) == b
 
-        g, x, y = polynomial_egcd(r, a, mod)
-        return (g, polynomial_subtract(y, polynomial_mult(q, x, mod)), x)
+        g, x, y = element_egcd(r, a, mod)
+        return (g, element_subtract(y, element_mult(q, x, mod)), x)
 
 
-def polynomial_inverse(a: GF2Polynomial,
-                       m: GF2Polynomial,
-                       ) -> GF2Polynomial:
-    g, x, _ = polynomial_egcd(a, m)
+def element_inverse(a: FieldElement,
+                    m: FieldElement,
+                    ) -> FieldElement:
+    g, x, _ = element_egcd(a, m)
     if g != 1:
-        raise ValueError(f'{polynomial_string(a)} was not invertible')
+        raise ValueError(f'{element_string(a)} was not invertible')
 
     return divmod(x, m)[1]
 
 
-def polynomial_mod_exp(a: GF2Polynomial,
-                       n: int,
-                       m: GF2Polynomial):
+def element_mod_exp(a: FieldElement,
+                    n: int,
+                    m: FieldElement):
     p = 1
     while n > 0:
         if n % 2 == 1:
-            p = polynomial_mult(p, a, m)
-        a = polynomial_mult(a, a, m)
+            p = element_mult(p, a, m)
+        a = element_mult(a, a, m)
         n = n // 2
 
     return p
 
 
-def test_polynomial_mult():
+def test_element_mult():
     # (x^2 + x + 1) * (x + 1) == x^3 + 1
-    assert polynomial_mult(7, 3, 2**16) == 9
-    assert polynomial_mult(7, 3, 8) == 1
+    assert element_mult(7, 3, 2**16) == 9
+    assert element_mult(7, 3, 8) == 1
 
 
-def test_polynomial_degree():
+def test_element_degree():
     # 1 = 1
-    assert polynomial_degree(1) == 0
+    assert element_degree(1) == 0
     # 2 = x
-    assert polynomial_degree(2) == 1
+    assert element_degree(2) == 1
     # 3 = x + 1
-    assert polynomial_degree(3) == 1
+    assert element_degree(3) == 1
 
 
-def test_polynomial_divmod():
-    assert polynomial_divmod(9, 7) == (3, 0)
-    assert polynomial_divmod(7, 15) == (0, 7)
+def test_element_divmod():
+    assert element_divmod(9, 7) == (3, 0)
+    assert element_divmod(7, 15) == (0, 7)
 
 
-def test_polynomial_gcd():
+def test_element_gcd():
     # xgcd(x^3 + x + 1, x) = (1, 1, x^2 + 1)
-    assert polynomial_egcd(11, 2) == (1, 1, 5)
+    assert element_egcd(11, 2) == (1, 1, 5)
 
     # xgcd(x, x^3 + x + 1) = (1, x^2 + 1, 1)
-    assert polynomial_egcd(2, 11) == (1, 5, 1)
+    assert element_egcd(2, 11) == (1, 5, 1)
 
     # xgcd(x^3 + x + 1, x^2 + x + 1) == (1, x + 1, x^2)
-    assert polynomial_egcd(11, 7) == (1, 3, 4)
+    assert element_egcd(11, 7) == (1, 3, 4)
 
     # gcd(x^3 + 1, x^2 + x + 1) = (x^2 + x + 1, 0, 1)
-    assert polynomial_egcd(9, 7) == (7, 0, 1)
+    assert element_egcd(9, 7) == (7, 0, 1)
 
 
-def test_polynomial_inverse():
+def test_element_inverse():
     # Irreducible: x^4 + x + 1
     mod = 2**4 + 2**1 + 2**0
 
     p = 2**3 + 1
-    inv = polynomial_inverse(p, mod)
-    assert polynomial_mult(p, inv, mod) == 1
+    inv = element_inverse(p, mod)
+    assert element_mult(p, inv, mod) == 1
 
 
-def test_polynomial_modexp():
+def test_element_modexp():
     p = 2**3 + 1
     mod = 2**6 + 2**1 + 1
     # Sage - ((x^3 + 1)^3) % (x^6 + x + 1)
-    assert polynomial_mod_exp(p, 3, mod) == 2**4 + 2**1
+    assert element_mod_exp(p, 3, mod) == 2**4 + 2**1
 
 
 def aes_encrypt(block: bytes, aes_key: str):
@@ -250,12 +250,12 @@ def ctr_aes(plaintext: bytes,
         cb = bytes(nonce) + block_num.to_bytes(4, byteorder='big')
         cb_block = int_from_bytes(aes_encrypt(cb, aes_key))
         b = int_from_bytes(get_nth_block(plaintext, block_num))
-        cipherblock = polynomial_add(b, cb_block).to_bytes(bytes_per_block,
-                                                           byteorder='big')
+        cipherblock = element_add(b, cb_block).to_bytes(bytes_per_block,
+                                                        byteorder='big')
 
         if block_num == num_blocks:
             # Last block.  Must zero out anything after the end.
-            # This is sort of annoying but I had issues getting masking to work
+            # This is sort of annoying; I had issues getting masking to work
             nonzero_bytes = plaintext_length % bytes_per_block
             cipherblock = bytearray(cipherblock)
             if nonzero_bytes != 0:
@@ -273,7 +273,6 @@ def gcm_mac(ciphertext: bytes,
             length_block: bytes,
             aes_key: str,
             nonce: bytes) -> int:
-    print(f'{ciphertext=} {associated_data=} {length_block=} {aes_key=} {nonce=} {len(ciphertext)}')
     bytes_per_block = 128 // 8
     block_num = 1
     total_bytes = associated_data + ciphertext + length_block
@@ -281,17 +280,17 @@ def gcm_mac(ciphertext: bytes,
     h = int_from_bytes(aes_encrypt(bytes(bytes_per_block), aes_key))
     g = 0
     while block_num <= len(total_bytes) // bytes_per_block:
-        # MAC: Convert block into GF2Polynomial
+        # MAC: Convert block into FieldElement
         block = get_nth_block(total_bytes, block_num)
-        b: GF2Polynomial = int_from_bytes(block)
-        g = polynomial_add(g, b)
-        g = polynomial_mult(g, h, GCM_MODULUS)
+        b: FieldElement = int_from_bytes(block)
+        g = element_add(g, b)
+        g = element_mult(g, h, GCM_MODULUS)
         block_num += 1
 
     # '1' block is length (128 - 96) // 8 = 4
     j0 = bytes(nonce) + (1).to_bytes(4, byteorder='big')
     s = int.from_bytes(aes_encrypt(j0, aes_key), byteorder='big')
-    t = polynomial_add(g, s)
+    t = element_add(g, s)
 
     return t
 
