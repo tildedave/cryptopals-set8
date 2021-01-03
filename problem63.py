@@ -75,12 +75,12 @@ def polynomial_string(p: FieldPolynomial):
                 if b == 1:
                     parts.insert(0, 'x')
                 else:
-                    parts.insert(0, f'({b_str})x')
+                    parts.insert(0, f'({b_str})*x')
             else:
                 if b == 1:
                     parts.insert(0, f'x^{i}')
                 else:
-                    parts.insert(0, f'({b_str})x^{i}')
+                    parts.insert(0, f'({b_str})*x^{i}')
 
     return ' + '.join(parts)
 
@@ -99,8 +99,8 @@ def element_mult(a: FieldElement,
         if mod is not None and element_degree(b) == element_degree(mod):
             b ^= mod
 
-    if mod is not None:
-        return p % mod
+    if mod is not None and p > mod:
+        return element_divmod(p, mod)[1]
 
     return p
 
@@ -129,7 +129,7 @@ def polynomial_mult(a: FieldPolynomial,
         for i in range(0, n + 1):
             j = n - i
             if i <= d1 and j <= d2:
-                p[n] = element_add(p[n], element_mult(a[i], b[j]))
+                p[n] = element_add(p[n], element_mult(a[i], b[j], GCM_MODULUS))
 
     if mod is None:
         return polynomial_trim(p)
@@ -187,11 +187,11 @@ def polynomial_divmod(a: FieldPolynomial,
     inv = element_inverse(b[-1], GCM_MODULUS)
 
     for i in range(len(a) - 1, len(b) - 2, -1):
-        out[i] = element_mult(out[i], inv)
+        out[i] = element_mult(out[i], inv, GCM_MODULUS)
         x = out[i]
         for j in range(len(b) - 2, -1, -1):
             term = i - (len(b) - 1 - j)
-            y = element_mult(x, b[j])
+            y = element_mult(x, b[j], GCM_MODULUS)
             out[term] = element_subtract(out[term], y)
 
     return polynomial_trim(out[len(b) - 1:]), polynomial_trim(out[:len(b) - 1])
@@ -327,13 +327,13 @@ def polynomial_edf(a: FieldPolynomial, d: int):
                 # Non-trivial factor existed - remove u from factors and add
                 # a new one
                 new_factors.append(u_gcd)
-                q, r = polynomial_divmod(u, u_gcd)
-                assert r == ZeroPolynomial
+                q, r0 = polynomial_divmod(u, u_gcd)
+                assert r0 == ZeroPolynomial
                 new_factors.append(q)
             else:
                 new_factors.append(u)
 
-            factors = new_factors
+        factors = new_factors
 
     return factors
 
@@ -361,6 +361,20 @@ def test_polynomial_divmod():
     assert polynomial_add(polynomial_mult(q, p2), r) == p1
 
 
+def test_polynomial_divmod_arbitrary_field_elements():
+    a = [56]
+    b = [26]
+    q, r = polynomial_divmod(a, b)
+
+    assert len(polynomial_mult(q, b)) == 1
+    # Here q should be 0 and r should be the inverse of b
+    x = polynomial_mult(q, b)[0]
+    assert x < GCM_MODULUS
+    assert x == a[0]
+    # q * b + r == a (supposedly)
+    assert polynomial_add(polynomial_mult(q, b), r) == a
+
+
 def test_polynomial_egcd():
     a = [1, 0, 0, 1]  # x^3 + 1
     b = [1, 0, 0, 0, 1]  # x^4 + 1
@@ -369,6 +383,13 @@ def test_polynomial_egcd():
     assert g == polynomial_add(polynomial_mult(u, a), polynomial_mult(v, b))
     assert polynomial_egcd(a, ZeroPolynomial) == (a, [1], ZeroPolynomial)
     assert polynomial_egcd(ZeroPolynomial, a) == (a, ZeroPolynomial, [1])
+
+    a = [1, 1, 0, 0, 0, 0, 1]
+    b = [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+    assert polynomial_egcd(a, b) == (
+        OnePolynomial,
+        [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1],
+        [1, 1, 1, 1, 1])
 
 
 def test_polynomial_exp():
@@ -383,7 +404,7 @@ def test_polynomial_derivative():
 
 def test_polynomial_remove_square_factors():
     p1 = [1, 1, 0, 0, 1, 1]  # x^5+x^4+x+1 = (x+1)^5
-    assert polynomial_remove_square_factors([1, 1, 0, 0, 1, 1]) == [1, 1]
+    assert polynomial_remove_square_factors(p1) == [1, 1]
     p2 = [1, 0, 0, 1, 1, 0, 0, 1]  # x^7+x^4+x^3+1 = (x^2+1)^2 * (x^3+1)
     assert polynomial_remove_square_factors(p2) == [1, 0, 0, 1]
 
@@ -425,8 +446,7 @@ def element_divmod(a: FieldElement,
 
 
 def element_egcd(a: FieldElement,
-                 b: FieldElement,
-                 mod: Optional[FieldElement] = None):
+                 b: FieldElement):
     """
     Return (d, u, v) so that a * u + b * v = d
     """
@@ -437,8 +457,8 @@ def element_egcd(a: FieldElement,
         # so now q * b + r == a
         assert element_add(element_mult(q, a), r) == b
 
-        g, x, y = element_egcd(r, a, mod)
-        return (g, element_subtract(y, element_mult(q, x, mod)), x)
+        g, x, y = element_egcd(r, a)
+        return (g, element_subtract(y, element_mult(q, x)), x)
 
 
 def element_inverse(a: FieldElement,
