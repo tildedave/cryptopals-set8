@@ -17,6 +17,8 @@ and desire, she had been comparing him in her mind with another."""
 
 
 FieldElement = int  # Element of GF(2^128)
+FieldPolynomial = List[FieldElement]  # Smallest degree up to largest degree
+ZeroPolynomial: FieldPolynomial = []
 
 
 def element_add(p1: FieldElement, p2: FieldElement):
@@ -29,6 +31,10 @@ element_subtract = element_add
 
 def element_degree(p1: FieldElement):
     return p1.bit_length() - 1
+
+
+def polynomial_degree(p1: FieldPolynomial):
+    return len(p1) - 1
 
 
 def element_string(p: FieldElement):
@@ -46,9 +52,33 @@ def element_string(p: FieldElement):
             if i == 0:
                 parts.insert(0, '1')
             elif i == 1:
-                parts.insert(0, 'x')
+                parts.insert(0, 'a')
             else:
-                parts.insert(0, f'x^{i}')
+                parts.insert(0, f'a^{i}')
+
+    return ' + '.join(parts)
+
+
+def polynomial_string(p: FieldPolynomial):
+    if p == ZeroPolynomial:
+        return '0'
+
+    parts: List[str] = []
+    for i, b in enumerate(p):
+        if b != 0:
+            b_str = element_string(b)
+            if i == 0:
+                parts.insert(0, b_str)
+            elif i == 1:
+                if b == 1:
+                    parts.insert(0, 'x')
+                else:
+                    parts.insert(0, f'({b_str})x')
+            else:
+                if b == 1:
+                    parts.insert(0, f'x^{i}')
+                else:
+                    parts.insert(0, f'({b_str})x^{i}')
 
     return ' + '.join(parts)
 
@@ -68,6 +98,156 @@ def element_mult(a: FieldElement,
             b ^= mod
 
     return p
+
+
+def polynomial_trim(a: FieldPolynomial):
+    # Find last non-zero index
+    for i in range(len(a) - 1, -1, -1):
+        if a[i] != 0:
+            return a[0:i + 1]
+
+    return ZeroPolynomial
+
+
+def polynomial_mult(a: FieldPolynomial,
+                    b: FieldPolynomial,
+                    ) -> FieldPolynomial:
+    d1 = polynomial_degree(a)
+    d2 = polynomial_degree(b)
+    dim = d1 + d2
+    p = [0] * (dim + 1)
+
+    for n in range(0, dim + 1):
+        # Degree 0 factors are just the i, j 0 multipliers
+        # Degree 1 factors are i = 1, j = 0, etc
+        for i in range(0, n + 1):
+            j = n - i
+            if i <= d1 and j <= d2:
+                p[n] = element_add(p[n], element_mult(a[i], b[j]))
+
+    # TODO: do I need to modulus this polynomial so degree > 129 is handled
+    # right (?)
+    return polynomial_trim(p)
+
+
+def polynomial_add(a: FieldPolynomial, b: FieldPolynomial):
+    d1 = polynomial_degree(a)
+    d2 = polynomial_degree(b)
+    dim = max(d1, d2)
+    p = [0] * (dim + 1)
+
+    for n in range(0, dim + 1):
+        if n > d1:
+            p[n] = b[n]
+        elif n > d2:
+            p[n] = a[n]
+        else:
+            p[n] = element_add(a[n], b[n])
+
+    return polynomial_trim(p)
+
+
+polynomial_subtract = polynomial_add
+
+
+def polynomial_scalar_mult(a: FieldPolynomial, x: FieldElement):
+    return polynomial_trim([element_mult(x, y) for y in a])
+
+
+def polynomial_divmod(a: FieldPolynomial,
+                      b: FieldPolynomial,
+                      ) -> Tuple[FieldPolynomial, FieldPolynomial]:
+    """
+    Return (q = a // b, r = a % b) through "synthetic division"
+
+    At the end, q * b + r == a
+    """
+    b = polynomial_trim(b)  # Makes determining the leading coefficient easier
+
+    d1 = polynomial_degree(a)
+    d2 = polynomial_degree(b)
+
+    if d1 < d2:
+        r = copy(a)
+        return ZeroPolynomial, r
+
+    out = copy(a)
+    inv = element_inverse(b[-1], GCM_MODULUS)
+
+    for i in range(len(a) - 1, len(b) - 2, -1):
+        out[i] = element_mult(out[i], inv)
+        x = out[i]
+        for j in range(len(b) - 2, -1, -1):
+            term = i - (len(b) - 1 - j)
+            y = element_mult(x, b[j])
+            out[term] = element_subtract(out[term], y)
+
+    return polynomial_trim(out[len(b) - 1:]), polynomial_trim(out[:len(b) - 1])
+
+
+def polynomial_egcd(a: FieldPolynomial, b: FieldPolynomial):
+    """
+    Given polynomials a and b, returns g, u, v so that g = u * a + v * b
+    """
+    a = polynomial_trim(a)
+    b = polynomial_trim(b)
+
+    if a == ZeroPolynomial:
+        return (b, ZeroPolynomial, [1])
+    else:
+        q, r = polynomial_divmod(b, a)
+        # so now q * b + r == a
+        assert polynomial_add(polynomial_mult(q, a), r) == b
+
+        g, x, y = polynomial_egcd(r, a)
+        return (g, polynomial_subtract(y, polynomial_mult(q, x)), x)
+
+
+def polynomial_exp(a: FieldPolynomial, n: int) -> FieldPolynomial:
+    p = [1]
+    while n > 0:
+        if n % 2 == 1:
+            p = polynomial_mult(p, a)
+        a = polynomial_mult(a, a)
+        n = n // 2
+
+    return p
+
+
+def test_polynomial_add():
+    p2 = [1, 0, 1]
+    p1 = [0, 1, 0, 1]
+    assert polynomial_add(p1, p2) == [1, 1, 1, 1]
+    assert polynomial_add(p1, p1) == ZeroPolynomial
+
+
+def test_polynomial_mult():
+    p1 = [1, 0, 1]
+    assert polynomial_mult(p1, p1) == [1, 0, 0, 0, 1]
+
+
+def test_polynomial_divmod():
+    assert polynomial_divmod([1, 0, 1], [1, 0, 0, 0, 1]) == ([], [1, 0, 1])
+
+    p1 = [0, 1, 1, 1]
+    p2 = [1, 1]
+    q, r = polynomial_divmod(p1, p2)
+    assert q, r == ([1, 0, 1], [1])
+    # This is true modulo trimming
+    assert polynomial_add(polynomial_mult(q, p2), r) == p1
+
+
+def test_polynomial_egcd():
+    a = [1, 0, 0, 1]  # x^3 + 1
+    b = [1, 0, 0, 0, 1]  # x^4 + 1
+    g, u, v = polynomial_egcd(a, b)
+    assert g == [1, 1]  # x + 1
+    assert g == polynomial_add(polynomial_mult(u, a), polynomial_mult(v, b))
+
+
+def test_polynomial_exp():
+    a = [1, 0, 1]  # x^2 + 1
+    assert polynomial_exp(a, 5) == [1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1]
 
 
 def element_divmod(a: FieldElement,
@@ -167,6 +347,7 @@ def test_element_inverse():
     p = 2**3 + 1
     inv = element_inverse(p, mod)
     assert element_mult(p, inv, mod) == 1
+    assert element_inverse(1, mod) == 1
 
 
 def test_element_modexp():
