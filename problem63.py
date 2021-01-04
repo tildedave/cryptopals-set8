@@ -1,4 +1,5 @@
 from copy import copy
+import random
 from random import randint
 from typing import List, Optional, Tuple
 
@@ -248,7 +249,7 @@ def polynomial_remove_square_factors(a: FieldPolynomial):
     while True:
         d = polynomial_derivative(a)
         g = polynomial_gcd(a, d)
-        if g == OnePolynomial:
+        if g == OnePolynomial or d == ZeroPolynomial:
             return a
 
         q, r = polynomial_divmod(a, g)
@@ -270,9 +271,9 @@ def polynomial_ddf(a: FieldPolynomial, q=2**128):
         g = polynomial_gcd(a_, poly)
         if g != OnePolynomial:
             factors.append((g, i))
-            q, r = polynomial_divmod(a_, g)
+            q0, r = polynomial_divmod(a_, g)
             assert r == ZeroPolynomial
-            a_ = q
+            a_ = q0
         i += 1
 
     if a_ != OnePolynomial:
@@ -413,7 +414,7 @@ def test_polynomial_ddf():
     assert result == [(p, 4)]
 
     # This is q = 2^128 which is the normal one we need
-    assert polynomial_ddf([1, 1, 1]) == ([1, 1, 1], 1)
+    assert polynomial_ddf([1, 1, 1]) == [([1, 1, 1], 1)]
 
 
 def test_polynomial_edf():
@@ -430,6 +431,14 @@ def test_polynomial_edf():
     assert [1, 0, 0, 1, 1] in result
     assert [1, 1, 1, 1, 1] in result
     assert [1, 1, 0, 0, 1] in result
+
+
+@pytest.mark.skip("fairly slow (30 seconds)")
+def test_factor_split_twelve_degree_poly():
+    # Should split into linear factors in GF(2**128)
+    p = [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
+    result = polynomial_edf(p, 1)
+    assert len(result) == 12
 
 
 def element_divmod(a: FieldElement,
@@ -475,9 +484,9 @@ def element_inverse(a: FieldElement,
     return x
 
 
-def element_mod_exp(a: FieldElement,
-                    n: int,
-                    m: FieldElement):
+def element_exp(a: FieldElement,
+                n: int,
+                m: Optional[FieldElement] = None):
     p = 1
     while n > 0:
         if n % 2 == 1:
@@ -532,11 +541,12 @@ def test_element_inverse():
     assert element_inverse(1, mod) == 1
 
 
-def test_element_modexp():
+def test_element_exp():
     p = 2**3 + 1
     mod = 2**6 + 2**1 + 1
     # Sage - ((x^3 + 1)^3) % (x^6 + x + 1)
-    assert element_mod_exp(p, 3, mod) == 2**4 + 2**1
+    assert element_exp(p, 3, mod) == 2**4 + 2**1
+    assert element_exp(p, 0) == 1
 
 
 def aes_encrypt(block: bytes, aes_key: str):
@@ -686,6 +696,43 @@ def gcm_decrypt(ciphertext: bytes,
     return plaintext[0: cipher_length], t0 == t
 
 
+def ciphertext_to_field_polynomial(ciphertext: bytes,
+                                   associated_data: bytes):
+    ciphertext, cipher_length = pad_bytes(ciphertext, 128 // 8)
+    associated_data, associated_length = pad_bytes(associated_data, 128 // 8)
+
+    associated_bitlen = (associated_length * 8).to_bytes(8, byteorder='big')
+    cipher_bitlen = (cipher_length * 8).to_bytes(8, byteorder='big')
+    length_block = associated_bitlen + cipher_bitlen
+    total_bytes = associated_data + ciphertext + length_block
+    bytes_per_block = 128 // 8
+    block_num = 1
+
+    poly = []
+    while block_num <= len(total_bytes) // bytes_per_block:
+        # MAC: Convert block into FieldElement
+        block = get_nth_block(total_bytes, block_num)
+        poly.append(int_from_bytes(block))
+        block_num += 1
+
+    # s is the constant term but we don't know that
+    poly.append(0)
+    poly.reverse()
+
+    return poly
+
+
+def polynomial_evaluate(poly: FieldPolynomial,
+                        x: FieldElement,
+                        ) -> FieldElement:
+    v = 0
+    for a, i in enumerate(poly):
+        i_coeff = element_mult(a, element_exp(x, i, GCM_MODULUS))
+        v = element_add(v, i_coeff)
+
+    return v
+
+
 def test_gcm_encryption_with_associated_data():
     aes_key = ''.join('s' for _ in range(32))
     nonce = b'\0' * 12
@@ -706,3 +753,41 @@ def test_gcm_encryption_single_block():
     result, valid = gcm_decrypt(ct, bytes(0), aes_key, nonce, t)
     assert result == plaintext
     assert valid
+
+
+def get_auth_key_candidates(l: List[Tuple[bytes, bytes, int]]):
+    p = ZeroPolynomial
+    for ct, ad, t in l:
+        poly = ciphertext_to_field_polynomial(ct, ad)
+        poly[0] = t
+        p = polynomial_add(p, poly)
+
+    p = polynomial_remove_square_factors(p)
+    p = polynomial_make_monic(p)
+
+    ddf_factors = polynomial_ddf(p)
+    candidates = []
+    for factor, d in ddf_factors:
+        edf_factors = polynomial_edf(factor, d)
+        for f in edf_factors:
+            if polynomial_degree(f) == 1:
+                # Polynomial has form x - c
+                candidates.append(f[0])
+
+    return candidates
+
+
+def test_gcm_encryption_attack():
+    random.seed(0)
+    aes_key = 's' * 32
+    nonce = b'\0' * 11 + b'\1'
+    plaintext = b'a' * (128 // 8) * 4
+    ct, t1 = gcm_encrypt(plaintext, bytes(0), aes_key, nonce)
+    ct2, t2 = gcm_encrypt(b'b' * (128 // 8), bytes(0), aes_key, nonce)
+    h = int_from_bytes(aes_encrypt(bytes(128 // 8), aes_key))
+
+    candidates = get_auth_key_candidates([
+        (ct, bytes(0), t1),
+        (ct2, bytes(0), t2),
+    ])
+    assert h in candidates, 'Should have retrieved authentication key'
