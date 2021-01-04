@@ -5,6 +5,7 @@ from elliptic_curve import EllipticCurvePoint
 from numtheory import mod_divide
 from rsa import hash_msg
 
+
 class ECDSASignature(NamedTuple):
     r: int
     s: int

@@ -201,6 +201,9 @@ def polynomial_gcd(a: FieldPolynomial, b: FieldPolynomial):
     if len(a) > len(b):
         return polynomial_gcd(b, a)
 
+    if a == ZeroPolynomial:
+        return b
+
     _, r = polynomial_divmod(b, a)
     if r == ZeroPolynomial:
         return polynomial_make_monic(a)
@@ -253,7 +256,7 @@ def polynomial_remove_square_factors(a: FieldPolynomial):
         a = q
 
 
-def polynomial_ddf(a: FieldPolynomial):
+def polynomial_ddf(a: FieldPolynomial, q=2**128):
     """
     Takes a monic, squarefree polynomial and computes its distinct degree
     factors
@@ -262,11 +265,8 @@ def polynomial_ddf(a: FieldPolynomial):
     factors: List[Tuple[FieldPolynomial, int]] = []
     a_ = copy(a)
     while polynomial_degree(a_) >= 2 * i:
-        # x^2^i - x --> in our field x^(2^i) + x
-        n = 2**i
-        poly = [0] * (n + 1)
-        poly[n] = 1
-        poly[1] = 1
+        # x^{(2^128)^i} - x --> in our field x^((2^128)^i) + x
+        poly = polynomial_subtract(polynomial_exp([0, 1], q**i, a_), [0, 1])
         g = polynomial_gcd(a_, poly)
         if g != OnePolynomial:
             factors.append((g, i))
@@ -274,6 +274,7 @@ def polynomial_ddf(a: FieldPolynomial):
             assert r == ZeroPolynomial
             a_ = q
         i += 1
+
     if a_ != OnePolynomial:
         factors.append((a_, polynomial_degree(a_)))
 
@@ -283,7 +284,7 @@ def polynomial_ddf(a: FieldPolynomial):
     return factors
 
 
-def polynomial_edf(a: FieldPolynomial, d: int):
+def polynomial_edf(a: FieldPolynomial, d: int, q: int = 2**128):
     """
     Factor polynomial using Cantor-Zassenhaus method
     """
@@ -295,19 +296,21 @@ def polynomial_edf(a: FieldPolynomial, d: int):
     while len(factors) < r:
         # Generate a random polynomial between 1 and a
         # Field elements are between 0 and 2^128 (so a random 128 bit integer)
-        h = polynomial_trim([randint(0, 2**128) for _ in range(len(a))])
+        h = polynomial_trim([randint(0, q) for _ in range(len(a))])
         h = polynomial_make_monic(h)
         assert h != ZeroPolynomial  # Incredibly unlikely
 
         g = polynomial_gcd(h, a)
         if g == OnePolynomial:
+            assert (q**d - 1) % 3 == 0
             g = polynomial_subtract(
-                polynomial_exp(h, (2**d - 1) / 3, a),
+                polynomial_exp(h, (q**d - 1) // 3, a),
                 OnePolynomial)
 
         new_factors = []
         for u in factors:
             if polynomial_degree(u) == d:
+                new_factors.append(u)
                 continue
 
             # Relies on u being trimmed
@@ -316,9 +319,9 @@ def polynomial_edf(a: FieldPolynomial, d: int):
                 # Non-trivial factor existed - remove u from factors and add
                 # a new one
                 new_factors.append(u_gcd)
-                q, r0 = polynomial_divmod(u, u_gcd)
+                q0, r0 = polynomial_divmod(u, u_gcd)
                 assert r0 == ZeroPolynomial
-                new_factors.append(q)
+                new_factors.append(q0)
             else:
                 new_factors.append(u)
 
@@ -368,6 +371,21 @@ def test_polynomial_exp():
     a = [1, 0, 1]  # x^2 + 1
     assert polynomial_exp(a, 5) == [1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1]
 
+    m = [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]  # x^12 + x^9 + x^6 + x^3 + 1
+    assert polynomial_exp([0, 1], 16, m) == [0, 1]
+
+
+def test_polynomial_gcd():
+    a = [1, 0, 0, 1]  # x^3 + 1
+    b = [1, 0, 0, 0, 1]  # x^4 + 1
+    assert polynomial_gcd(a, b) == [1, 1]  # x + 1
+    assert polynomial_gcd(a, ZeroPolynomial) == a
+    assert polynomial_gcd(ZeroPolynomial, a) == a
+
+    a = [1, 1, 0, 0, 0, 0, 1]
+    b = [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+    assert polynomial_gcd(a, b) == OnePolynomial
+
 
 def test_polynomial_derivative():
     # Derivative of x^4 + x^3 + x^2 + x + 1 = 3x^2 + 1 = x^2 + 1
@@ -382,7 +400,7 @@ def test_polynomial_remove_square_factors():
 
 
 def test_polynomial_ddf():
-    ddf = polynomial_ddf([1, 0, 0, 1])
+    ddf = polynomial_ddf([1, 0, 0, 1], q=2)
     assert len(ddf) == 2
 
     assert ([1, 1], 1) in ddf
@@ -391,15 +409,27 @@ def test_polynomial_ddf():
     # ((x^4+x^3+1) * (x^4+x^3+x^2+x+1) * (x^4+x+1)) = x^12+x^9+x^6+x^3+1
     # These are all irreducible so DDF won't break these down further.
     p = [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-    assert polynomial_ddf(p) == [(p, 4)]
+    result = polynomial_ddf(p, q=2)
+    assert result == [(p, 4)]
+
+    # This is q = 2^128 which is the normal one we need
+    assert polynomial_ddf([1, 1, 1]) == ([1, 1, 1], 1)
 
 
-@pytest.mark.skip('looping forever')
 def test_polynomial_edf():
+    result = polynomial_edf([1, 1, 1], 1)
+    # Every polynomial of degree < 128 splits in GF(2**128)
+    assert len(result) == 2
+    assert polynomial_mult(result[0], result[1]) == [1, 1, 1]
+
     # ((x^4+x^3+1) * (x^4+x^3+x^2+x+1) * (x^4+x+1)) = x^12+x^9+x^6+x^3+1
     # These are all irreducible so DDF won't break these down further.
     p = [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]
-    assert polynomial_edf(p, 4) == [(p, 4)]
+    result = polynomial_edf(p, 4, q=2)
+    assert len(result) == 3
+    assert [1, 0, 0, 1, 1] in result
+    assert [1, 1, 1, 1, 1] in result
+    assert [1, 1, 0, 0, 1] in result
 
 
 def element_divmod(a: FieldElement,
