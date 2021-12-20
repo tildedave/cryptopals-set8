@@ -362,3 +362,29 @@ def test_scalar_multiplication_vector():
     e3 = element_to_vec(3)
     result = matrix_multiply(GF2Context, x_plus_one_matrix, vec_to_matrix(e3))
     assert vec_to_element(matrix_to_vec(result)) == 5
+
+
+def gf2_square_matrix() -> Matrix:
+    cols = []
+    for i in range(0, 128):
+        basis_elem = 1 << i
+        cols.append(element_to_vec(element_mult(
+            basis_elem, basis_elem, GCM_MODULUS)))
+
+    return matrix_transpose(cols)
+
+
+def test_squaring_as_matrix():
+    sq_m = gf2_square_matrix()
+    # (a + 1)^2 = a^2 + 1
+    e1 = element_to_vec(3)
+    result = matrix_multiply(GF2Context, sq_m, vec_to_matrix(e1))
+    assert vec_to_element(matrix_to_vec(result)) == 5
+    # (a^2 + a + 1)^2 = a^4 + a^2 + 1
+    e2 = element_to_vec(7)
+    result = matrix_multiply(GF2Context, sq_m, vec_to_matrix(e2))
+    assert vec_to_element(matrix_to_vec(result)) == 21
+    # (a^5 + a + 1)^2 = a^10 + a^2 + 1
+    e3 = element_to_vec(35)
+    result = matrix_multiply(GF2Context, sq_m, vec_to_matrix(e3))
+    assert vec_to_element(matrix_to_vec(result)) == 1029
