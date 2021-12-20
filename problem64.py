@@ -1,11 +1,13 @@
-from typing import Callable, List
+from typing import Callable, List, TypeVar
 
 # Length = 128
-FieldElement = List[int]  # Element of GF(2^128) - each element is 0 or 1
-FieldElementFunc = Callable[[int, int], int]
+Scalar = int
+SV = TypeVar('SV', bound=Scalar)
+ScalarFunc = Callable[[SV, SV], SV]
 
 # Length of both of these = 128
-Matrix = List[List[int]]
+Vec = List[Scalar]
+Matrix = List[Vec]
 MatrixSize = 128
 
 
@@ -53,15 +55,19 @@ def combine_matrices(a_11: Matrix,
     return c
 
 
-class RingContext:
+class FieldContext:
     def __init__(self,
-                 element_add: FieldElementFunc,
-                 element_mult: FieldElementFunc) -> None:
+                 element_add: Callable[[Scalar, Scalar], Scalar],
+                 element_mult: Callable[[Scalar, Scalar], Scalar],
+                 element_inverse: Callable[[Scalar], Scalar],
+                 minus_one: Scalar) -> None:
         self.element_add = element_add
         self.element_mult = element_mult
+        self.element_inverse = element_inverse
+        self.minus_one = minus_one
 
 
-def matrix_multiply_naive(ctx: RingContext, a: Matrix, b: Matrix) -> Matrix:
+def matrix_multiply_naive(ctx: FieldContext, a: Matrix, b: Matrix) -> Matrix:
     # Naive matrix multiplication.  Assumes a and b are square matrices of
     # the same size.
     # https://en.wikipedia.org/wiki/Matrix_multiplication_algorithm#Iterative_algorithm
@@ -78,17 +84,29 @@ def matrix_multiply_naive(ctx: RingContext, a: Matrix, b: Matrix) -> Matrix:
     return c
 
 
-def matrix_add(ctx: RingContext, a: Matrix, b: Matrix) -> Matrix:
+def vec_add(ctx, v1: Vec, v2: Vec) -> Vec:
+    assert len(v1) == len(v2)
+    v = [0] * len(v1)
+    for i in range(0, len(v1)):
+        v[i] = ctx.element_add(v1[i], v2[i])
+
+    return v
+
+
+def vec_scalar_mult(ctx, v: Vec, c: Scalar) -> Vec:
+    return [ctx.element_mult(x, c) for x in v]
+
+
+def matrix_add(ctx: FieldContext, a: Matrix, b: Matrix) -> Matrix:
     assert len(a) == len(b)
     c = make_matrix(size=len(a))
     for i in range(0, len(a)):
-        for j in range(0, len(a)):
-            c[i][j] = ctx.element_add(a[i][j], b[i][j])
+        c[i] = vec_add(ctx, a[i], b[i])
 
     return c
 
 
-def matrix_multiply_divide_and_conquer(ctx: RingContext,
+def matrix_multiply_divide_and_conquer(ctx: FieldContext,
                                        a: Matrix,
                                        b: Matrix,
                                        ) -> Matrix:
@@ -103,7 +121,7 @@ def matrix_multiply_divide_and_conquer(ctx: RingContext,
     assert a_size == b_size
 
     if a_size == 1:
-        return [[a[0][0] * b[0][0]]]
+        return [[ctx.element_mult(a[0][0], b[0][0])]]
 
     a_11, a_12, a_21, a_22 = split_square_matrix(a)
     b_11, b_12, b_21, b_22 = split_square_matrix(b)
@@ -128,20 +146,113 @@ def matrix_multiply_divide_and_conquer(ctx: RingContext,
     return combine_matrices(c_11, c_12, c_21, c_22)
 
 
-IntegerContext = RingContext(lambda x, y: x + y, lambda x, y: x * y)
-GF2Context = RingContext(lambda x, y: x ^ y, lambda x, y: x & y)
+def assert_square_matrix(a: Matrix):
+    for i, col in enumerate(a):
+        assert len(col) == len(a), \
+            f'Row {i} did not have the expected number of columns ({len(a)})'
+
+
+def matrix_null_space(ctx: FieldContext, a: Matrix):
+    """
+    Adapted from Algorithm N of TAoCP section 4.6.2
+
+    This finds the linearly independency vectors v_i, ..., v_i such that
+    A v_i = 0
+    """
+    assert_square_matrix(a)
+    n = len(a)
+    print(n)
+    cols = [-1] * n
+    r = 0
+    vecs = []
+
+    for k in range(0, n):
+        row = a[k]
+        found = False
+        for j in range(0, n):
+            if row[j] != 0 and cols[j] < 0:
+                found = True
+                break
+
+        if found:
+            inv = ctx.element_mult(ctx.minus_one, ctx.element_inverse(row[j]))
+            # multiply column j of A by -1 / a_kj
+            for i in range(0, n):
+                a[i][j] = ctx.element_mult(a[i][j], inv)
+
+            # now add a_{ki} times column j to column i for all i != j
+            for i in range(0, n):
+                if i == j:
+                    continue
+                fact = a[k][i]
+                for l in range(0, n):
+                    a[l][i] = ctx.element_add(a[l][i],
+                                              ctx.element_mult(a[l][j], fact))
+            cols[j] = k
+        else:
+            # no j
+            r += 1
+            # output the vector
+            null_vec: Vec = [0] * n
+            for j in range(0, n):
+                for s, c_s in enumerate(cols):
+                    if c_s == j and c_s >= 0:
+                        null_vec[j] = a[k][s]
+                        break
+
+                if j == k:
+                    null_vec[j] = 1
+
+            vecs.append(null_vec)
+
+    return vecs
+
+
+def PrimeContext(p):
+    return FieldContext(lambda x, y: (x + y) % p,
+                        lambda x, y: (x * y) % p,
+                        lambda x: pow(x, p - 2, p),
+                        p - 1)
 
 
 def test_matrix_multiply():
     a = [[0, 1], [1, 0]]
     b = [[2, 3], [3, 4]]
 
-    assert matrix_multiply_naive(IntegerContext, b, a) == [[3, 2], [4, 3]]
-    assert matrix_multiply_divide_and_conquer(IntegerContext, b, a) == \
+    ctx = PrimeContext(127)
+    assert matrix_multiply_naive(ctx, b, a) == [[3, 2], [4, 3]]
+    assert matrix_multiply_divide_and_conquer(ctx, b, a) == \
         [[3, 2], [4, 3]]
 
     c = [[2, 7, 3], [1, 5, 8], [0, 4, 1]]
     d = [[3, 0, 1], [2, 1, 0], [1, 2, 4]]
 
-    assert matrix_multiply_naive(IntegerContext, c, d) == \
+    assert matrix_multiply_naive(ctx, c, d) == \
         [[23, 13, 14], [21, 21, 33], [9, 6, 4]]
+
+
+def test_matrix_null_space():
+    knuth_example = [
+        [0, 0, 0, 0, 0, 0, 0, 0],
+        [2, 0, 7, 11, 10, 12, 5, 11],
+        [3, 6, 3, 3, 0, 4, 7, 2],
+        [4, 3, 6, 4, 1, 6, 2, 3],
+        [2, 11, 8, 8, 2, 1, 3, 11],
+        [6, 11, 8, 6, 2, 6, 10, 9],
+        [5, 11, 7, 10, 0, 11, 6, 12],
+        [3, 3, 12, 5, 0, 11, 9, 11],
+    ]
+    results = matrix_null_space(PrimeContext(13), knuth_example)
+    assert results == [
+        [1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 5, 5, 0, 9, 5, 1, 0],
+        [0, 9, 11, 9, 10, 12, 0, 1],
+    ]
+
+    linearly_independent = [
+        [1, 0, 5],
+        [0, 1, 2],
+        [0, 0, 1],
+    ]
+    results = matrix_null_space(PrimeContext(13), linearly_independent)
+    assert len(results) == 0
