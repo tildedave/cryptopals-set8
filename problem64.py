@@ -67,16 +67,23 @@ class FieldContext:
         self.minus_one = minus_one
 
 
-def matrix_multiply_naive(ctx: FieldContext, a: Matrix, b: Matrix) -> Matrix:
-    # Naive matrix multiplication.  Assumes a and b are square matrices of
-    # the same size.
+def matrix_multiply(ctx: FieldContext, a: Matrix, b: Matrix) -> Matrix:
+    # Naive matrix multiplication.
     # https://en.wikipedia.org/wiki/Matrix_multiplication_algorithm#Iterative_algorithm
-    c = make_matrix(size=len(a))
+    c: Matrix = [[]] * len(a)
+    for i in range(0, len(c)):
+        c[i] = [0] * len(b[0])
+
+    # a -> m * n
+    # b -> n * p
+    # result is size m * p
 
     for i in range(0, len(a)):
-        for j in range(0, len(b)):
+        for j in range(0, len(b[0])):
+            # putting c[i][j] in place
+            # c[i][j] = dot product of row i of a * column j of b
             sum = 0
-            for n in range(0, len(a)):
+            for n in range(0, len(a[i])):
                 m = ctx.element_mult(a[i][n], b[n][j])
                 sum = ctx.element_add(sum, m)
             c[i][j] = sum
@@ -220,15 +227,20 @@ def test_matrix_multiply():
     b = [[2, 3], [3, 4]]
 
     ctx = PrimeContext(127)
-    assert matrix_multiply_naive(ctx, b, a) == [[3, 2], [4, 3]]
+    assert matrix_multiply(ctx, b, a) == [[3, 2], [4, 3]]
     assert matrix_multiply_divide_and_conquer(ctx, b, a) == \
         [[3, 2], [4, 3]]
 
     c = [[2, 7, 3], [1, 5, 8], [0, 4, 1]]
     d = [[3, 0, 1], [2, 1, 0], [1, 2, 4]]
 
-    assert matrix_multiply_naive(ctx, c, d) == \
+    assert matrix_multiply(ctx, c, d) == \
         [[23, 13, 14], [21, 21, 33], [9, 6, 4]]
+
+    e = [[1, 2, 3], [4, 5, 6]]
+    f = [[7, 8], [9, 10], [11, 12]]
+
+    assert matrix_multiply(PrimeContext(241), e, f) == [[58, 64], [139, 154]]
 
 
 def test_matrix_null_space():
