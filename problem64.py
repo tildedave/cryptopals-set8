@@ -1,5 +1,7 @@
 from typing import Callable, List, TypeVar
 
+from problem63 import GCM_MODULUS, FieldElement, element_add, element_mult
+
 # Length = 128
 Scalar = int
 SV = TypeVar('SV', bound=Scalar)
@@ -268,3 +270,95 @@ def test_matrix_null_space():
     ]
     results = matrix_null_space(PrimeContext(13), linearly_independent)
     assert len(results) == 0
+
+
+GF2Context = FieldContext(lambda x, y: (x + y) % 2,
+                          lambda x, y: (x * y) % 2,
+                          lambda x: (x % 2),
+                          1)
+
+
+def element_to_vec(c: FieldElement) -> Vec:
+    v = [0] * 128
+    i = 0
+    while c > 0:
+        if c % 2 == 1:
+            v[i] = 1
+        c = c // 2
+        i += 1
+
+    return v
+
+
+def vec_trunc(v: Vec):
+    last_non_zero = None
+    for i in range(0, 128):
+        if v[i] != 0:
+            last_non_zero = i + 1
+
+    return v[0:last_non_zero]
+
+
+def test_element_to_vec():
+    assert(vec_trunc(element_to_vec(9)) == [1, 0, 0, 1])
+
+
+def matrix_transpose(a: Matrix) -> Matrix:
+    rows = len(a)
+    cols = len(a[0])
+    print(rows, cols)
+    b: Matrix = [[]] * cols
+    for i in range(0, rows):
+        b[i] = [0] * rows
+
+    for i in range(0, len(a)):
+        for j in range(0, len(a[i])):
+            b[j][i] = a[i][j]
+
+    return b
+
+
+def gf2_scalar_matrix(c: FieldElement) -> Matrix:
+    cols = []
+    for i in range(0, 128):
+        basis_elem = 1 << i
+        cols.append(element_to_vec(element_mult(c, basis_elem, GCM_MODULUS)))
+
+    return matrix_transpose(cols)
+
+
+def vec_to_matrix(v: Vec) -> Matrix:
+    return [[x] for x in v]
+
+
+def matrix_to_vec(m: Matrix) -> Vec:
+    v = [0] * len(m)
+    for i in range(0, len(m)):
+        assert len(m[i]) == 1, \
+            'Assertion error: matrix_to_vec run on have multi-column matrix'
+        v[i] = m[i][0]
+
+    return v
+
+
+def vec_to_element(v: Vec) -> FieldElement:
+    e = 0
+    for i in range(0, 128):
+        if v[i] == 1:
+            e += 2**i
+
+    return e
+
+
+def test_scalar_multiplication_vector():
+    # Let's experiment with finding a matrix
+    # Using test from problem63:
+    # (x^2 + x + 1) * (x + 1) == x^3 + 1
+    x_plus_one_matrix = gf2_scalar_matrix(3)
+    e2 = element_to_vec(7)
+    result = matrix_multiply(GF2Context, x_plus_one_matrix, vec_to_matrix(e2))
+    assert vec_to_element(matrix_to_vec(result)) == 9
+
+    e3 = element_to_vec(3)
+    result = matrix_multiply(GF2Context, x_plus_one_matrix, vec_to_matrix(e3))
+    assert vec_to_element(matrix_to_vec(result)) == 5
