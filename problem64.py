@@ -1,6 +1,9 @@
+from math import log2
+import random
+import string
 from typing import Callable, List, TypeVar
 
-from problem63 import GCM_MODULUS, FieldElement, element_add, element_mult
+from problem63 import GCM_MODULUS, FieldElement, element_mult, gcm_encrypt
 
 # Length = 128
 Scalar = int
@@ -170,7 +173,6 @@ def matrix_null_space(ctx: FieldContext, a: Matrix):
     """
     assert_square_matrix(a)
     n = len(a)
-    print(n)
     cols = [-1] * n
     r = 0
     vecs = []
@@ -306,7 +308,6 @@ def test_element_to_vec():
 def matrix_transpose(a: Matrix) -> Matrix:
     rows = len(a)
     cols = len(a[0])
-    print(rows, cols)
     b: Matrix = [[]] * cols
     for i in range(0, rows):
         b[i] = [0] * rows
@@ -388,3 +389,39 @@ def test_squaring_as_matrix():
     e3 = element_to_vec(35)
     result = matrix_multiply(GF2Context, sq_m, vec_to_matrix(e3))
     assert vec_to_element(matrix_to_vec(result)) == 1029
+
+
+def generate_plaintext(num_blocks):
+    block_size = 128 // 8
+    ciphertext = ''
+    for _ in range(num_blocks):
+        block = ''.join(random.choice(string.ascii_letters)
+                        for _ in range(block_size))
+        assert len(block.encode()) == block_size
+        ciphertext += block
+
+    return ciphertext
+
+
+def test_gcm_encrypt_truncated_mac_attack():
+    random.seed(0)
+    aes_key = ''.join(random.choice(string.ascii_letters) for _ in range(32))
+    nonce = ''.join(random.choice(string.ascii_letters) for _ in range(12))
+    assert len(nonce.encode()) * 8 == 96
+
+    num_blocks = 2 ** 17
+    plaintext1 = generate_plaintext(num_blocks).encode()
+    # This takes around 20 seconds
+    ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
+                                tag_bits=64)
+
+    n = int(log2(num_blocks))
+    num_rows = (n - 1) * 128
+    num_columns = n * 128  # number of bits that we can flip
+
+    dependency_matrix = [[]] * num_rows
+    for i in range(num_rows):
+        dependency_matrix[i] = [0] * num_columns
+
+    for j in range(num_columns):
+        pass
