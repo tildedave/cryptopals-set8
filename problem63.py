@@ -90,14 +90,21 @@ def element_mult(a: FieldElement,
                  mod: Optional[FieldElement] = None,
                  ) -> FieldElement:
     p = 0
+    mod_degree = None
+    if mod is not None:
+        mod_degree = element_degree(mod)
+    b_degree = element_degree(b)
+
     while a > 0:
         if a & 1:
             p ^= b
         a >>= 1
         b <<= 1
+        b_degree += 1
 
-        if mod is not None and element_degree(b) == element_degree(mod):
+        if mod is not None and b_degree == mod_degree:
             b ^= mod
+            b_degree = element_degree(b)
 
     if mod is not None and p > mod:
         return element_divmod(p, mod)[1]
