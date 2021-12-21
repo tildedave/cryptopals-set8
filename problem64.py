@@ -3,9 +3,9 @@ import os.path
 import pickle
 import random
 import string
-from typing import Callable, List, TypeVar
+from typing import Callable, Dict, List, Tuple, TypeVar
 
-from problem63 import GCM_MODULUS, FieldElement, element_mult, gcm_encrypt
+from problem63 import GCM_MODULUS, FieldElement, element_mult, gcm_encrypt, get_nth_block, int_from_bytes
 
 # Length = 128
 Scalar = int
@@ -405,32 +405,92 @@ def generate_plaintext(num_blocks):
     return ciphertext
 
 
-def test_gcm_encrypt_truncated_mac_attack():
-    random.seed(0)
+def calculate_ad(coeffs: List[FieldElement]):
+    ad_matrix = make_matrix()
+    for i in range(1, len(coeffs)):
+        #
+        pass
+
+
+def get_precomputed_structures() -> Tuple[bytes, int, List[Matrix]]:
     aes_key = ''.join(random.choice(string.ascii_letters) for _ in range(32))
     nonce = ''.join(random.choice(string.ascii_letters) for _ in range(12))
     assert len(nonce.encode()) * 8 == 96
 
     num_blocks = 2 ** 17
+    n = int(log2(num_blocks))
     plaintext1 = generate_plaintext(num_blocks).encode()
+    matrix_pows: List[Matrix]
 
-    filename = './problem64_ciphertext.p'
+    filename = './problem64_structures.p'
     if os.path.exists(filename):
         data = pickle.load(open(filename, 'rb'))
         ciphertext, t = data['ciphertext'], data['t']
+        matrix_pows = data['matrix_pows']
     else:
-        # This takes around 20 seconds
+        # This takes around 20 seconds.  Pickling it saves some time while
+        # fiddling with the system of simultaneous equations.
+        # Longer-term we will need to generate multiple ciphertexts, so we
+        # may just write these into the file as multiple ciphertexts as well.
         ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
                                     tag_bits=64)
-        pickle.dump({'ciphertext': ciphertext, 't': t}, open(filename, 'wb'))
 
+        # This takes a bunch of time too
+        matrix_pows = [[[0]]] * (n + 1)
+        sq_matrix = m = gf2_square_matrix()  # Msq (y) = y * y
+        for i in range(1, n + 1):
+            matrix_pows[i] = m
+            m = matrix_multiply(GF2Context, sq_matrix, m)
+
+        pickle.dump({
+            'ciphertext': ciphertext,
+            't': t,
+            'matrix_pows': matrix_pows,
+        }, open(filename, 'wb'))
+
+    return ciphertext, t, matrix_pows
+
+
+def test_squaring_as_matrix_with_precomputed_powers():
+    _, _, matrix_pows = get_precomputed_structures()
+
+    e1 = element_to_vec(3)
+    expected = 3
+    for i in range(1, 17):
+        result = matrix_multiply(GF2Context, matrix_pows[i], vec_to_matrix(e1))
+        expected = element_mult(expected, expected, GCM_MODULUS)
+        assert vec_to_element(matrix_to_vec(result)) == expected
+
+
+def test_gcm_encrypt_truncated_mac_attack():
+    random.seed(0)
+
+    num_blocks = 2 ** 17
     n = int(log2(num_blocks))
+
+    ciphertext, t, matrix_pows = get_precomputed_structures()
+
+    # The problem (and Ferguson's paper) assume the first block contains just
+    # metadata.  It doesn't look like that's the case in the NIST document (I
+    # probably just haven't found the appropriate section) or the Problem 63
+    # specifications.  In any case we'll just ignore the first block so we can
+    # be consistent with the instructions.
     num_rows = (n - 1) * 128
-    num_columns = n * 128  # number of bits that we can flip
+    num_columns = n * 128
 
     dependency_matrix = [[]] * num_rows
     for i in range(num_rows):
         dependency_matrix[i] = [0] * num_columns
 
+    coeffs: List[FieldElement] = [0] * (n + 1)
+    for i in range(1, n + 1):
+        # Extract block 2**i from ciphertext
+        coeffs[i] = int_from_bytes(get_nth_block(ciphertext, 2**i))
+
     for j in range(num_columns):
-        pass
+        # Create the matrix AD that results from flipping the jth bit of the
+        # ciphertext.
+        block_num = (j // 128) + 1
+        new_coeffs = coeffs.copy()
+        new_coeffs[block_num] = coeffs[block_num] & ~(1 << j)
+        ad_matrix = calculate_ad(new_coeffs)
