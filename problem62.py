@@ -212,7 +212,7 @@ def test_lll_against_biased_nonce_attack():
     l = 8  # Number of biased bits
     q = dh.config.n
 
-    attacker_pairs : List[Tuple[int, int]] = []
+    attacker_pairs: List[Tuple[int, int]] = []
     for _ in range(num_signatures):
         msg = ''.join(random.choices(chars, k=message_length))
         sig = ecdsa_sign_biased(msg, alice_keypair)
