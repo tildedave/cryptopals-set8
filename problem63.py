@@ -1,5 +1,4 @@
 from copy import copy
-import random
 from random import randint
 from typing import List, Optional, Tuple
 
@@ -587,6 +586,7 @@ def gcm_encrypt(plaintext: bytes,
                 associated_data: bytes,
                 aes_key: str,
                 nonce: bytes,
+                tag_bits: int = 128,
                 ) -> Tuple[bytes, int]:
     assert len(nonce) == 96 // 8, f'Nonce must be {96 // 8} bytes'
 
@@ -604,7 +604,8 @@ def gcm_encrypt(plaintext: bytes,
 
     assert len(length_block) == bytes_per_block
     # MAC Calculation
-    t = gcm_mac(ciphertext, associated_data, length_block, aes_key, nonce)
+    t = gcm_mac(ciphertext, associated_data, length_block, aes_key, nonce,
+                tag_bits=tag_bits)
 
     # Must trim ciphertext to original bitlength
     return ciphertext[0: plaintext_length], t
@@ -645,7 +646,8 @@ def gcm_mac(ciphertext: bytes,
             associated_data: bytes,
             length_block: bytes,
             aes_key: str,
-            nonce: bytes) -> int:
+            nonce: bytes,
+            tag_bits: int = 128) -> int:
     bytes_per_block = 128 // 8
     block_num = 1
     total_bytes = associated_data + ciphertext + length_block
@@ -665,14 +667,16 @@ def gcm_mac(ciphertext: bytes,
     s = int.from_bytes(aes_encrypt(j0, aes_key), byteorder='big')
     t = element_add(g, s)
 
-    return t
+    # MSB calculation - invert a zero mask
+    return (~((1 << (128 - tag_bits)) - 1)) & t
 
 
 def gcm_decrypt(ciphertext: bytes,
                 associated_data: bytes,
                 aes_key: str,
                 nonce: bytes,
-                t: int):
+                t: int,
+                tag_bits: int = 128):
     assert len(nonce) == 96 // 8, f'Nonce must be {96 // 8} bytes'
 
     bytes_per_block = 128 // 8
@@ -691,7 +695,8 @@ def gcm_decrypt(ciphertext: bytes,
     length_block = associated_bitlen + cipher_bitlen
     assert len(length_block) == bytes_per_block
 
-    t0 = gcm_mac(ciphertext, associated_data, length_block, aes_key, nonce)
+    t0 = gcm_mac(ciphertext, associated_data, length_block, aes_key, nonce,
+                 tag_bits=tag_bits)
 
     return plaintext[0: cipher_length], t0 == t
 
@@ -778,7 +783,6 @@ def get_auth_key_candidates(l: List[Tuple[bytes, bytes, int]]):
 
 
 def test_gcm_encryption_attack():
-    random.seed(0)
     aes_key = 's' * 32
     nonce = b'\0' * 11 + b'\1'
     plaintext = b'a' * (128 // 8) * 4
