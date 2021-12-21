@@ -1,4 +1,6 @@
 from math import log2
+import os.path
+import pickle
 import random
 import string
 from typing import Callable, List, TypeVar
@@ -411,9 +413,16 @@ def test_gcm_encrypt_truncated_mac_attack():
 
     num_blocks = 2 ** 17
     plaintext1 = generate_plaintext(num_blocks).encode()
-    # This takes around 20 seconds
-    ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
-                                tag_bits=64)
+
+    filename = './problem64_ciphertext.p'
+    if os.path.exists(filename):
+        data = pickle.load(open(filename, 'rb'))
+        ciphertext, t = data['ciphertext'], data['t']
+    else:
+        # This takes around 20 seconds
+        ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
+                                    tag_bits=64)
+        pickle.dump({'ciphertext': ciphertext, 't': t}, open(filename, 'wb'))
 
     n = int(log2(num_blocks))
     num_rows = (n - 1) * 128
