@@ -1,11 +1,20 @@
 from math import log2
+from copy import deepcopy
 import os.path
 import pickle
 import random
 import string
 from typing import Callable, Dict, List, Tuple, TypeVar
 
-from problem63 import GCM_MODULUS, FieldElement, element_mult, gcm_encrypt, get_nth_block, int_from_bytes
+from problem63 import (
+    GCM_MODULUS,
+    FieldElement,
+    element_add,
+    element_mult,
+    gcm_encrypt,
+    get_nth_block,
+    int_from_bytes,
+)
 
 # Length = 128
 Scalar = int
@@ -98,24 +107,16 @@ def matrix_multiply(ctx: FieldContext, a: Matrix, b: Matrix) -> Matrix:
     return c
 
 
-def vec_add(ctx, v1: Vec, v2: Vec) -> Vec:
-    assert len(v1) == len(v2)
-    v = [0] * len(v1)
-    for i in range(0, len(v1)):
-        v[i] = ctx.element_add(v1[i], v2[i])
-
-    return v
-
-
 def vec_scalar_mult(ctx, v: Vec, c: Scalar) -> Vec:
     return [ctx.element_mult(x, c) for x in v]
 
 
 def matrix_add(ctx: FieldContext, a: Matrix, b: Matrix) -> Matrix:
     assert len(a) == len(b)
-    c = make_matrix(size=len(a))
-    for i in range(0, len(a)):
-        c[i] = vec_add(ctx, a[i], b[i])
+    c = deepcopy(a)
+    for i, a_i in enumerate(a):
+        for j, x in enumerate(a_i):
+            c[i][j] = ctx.element_add(x, b[i][j])
 
     return c
 
@@ -277,7 +278,7 @@ def test_matrix_null_space():
 
 
 GF2Context = FieldContext(lambda x, y: (x + y) % 2,
-                          lambda x, y: (x * y) % 2,
+                          lambda x, y: 0 if x == 0 or y == 0 else 1,
                           lambda x: (x % 2),
                           1)
 
@@ -405,11 +406,25 @@ def generate_plaintext(num_blocks):
     return ciphertext
 
 
-def calculate_ad(coeffs: List[FieldElement]):
-    ad_matrix = make_matrix()
+def calculate_ad(matrix_pows: List[Matrix],
+                 coeffs: List[FieldElement],
+                 new_coeffs: List[FieldElement],
+                 ) -> Matrix:
+    ad_matrix = make_matrix(128)
     for i in range(1, len(coeffs)):
-        #
-        pass
+        if coeffs[i] == new_coeffs[i]:
+            assert element_add(coeffs[i], new_coeffs[i]) == 0
+            continue
+        # adding is subtraction in GF2
+        flipped_scalar = element_add(coeffs[i], new_coeffs[i])
+        ad_factor = matrix_multiply(
+            GF2Context,
+            gf2_scalar_matrix(flipped_scalar),
+            matrix_pows[i],
+        )
+        ad_matrix = matrix_add(GF2Context, ad_matrix, ad_factor)
+
+    return ad_matrix
 
 
 def get_precomputed_structures() -> Tuple[bytes, int, List[Matrix]]:
@@ -419,7 +434,6 @@ def get_precomputed_structures() -> Tuple[bytes, int, List[Matrix]]:
 
     num_blocks = 2 ** 17
     n = int(log2(num_blocks))
-    plaintext1 = generate_plaintext(num_blocks).encode()
     matrix_pows: List[Matrix]
 
     filename = './problem64_structures.p'
@@ -427,11 +441,13 @@ def get_precomputed_structures() -> Tuple[bytes, int, List[Matrix]]:
         data = pickle.load(open(filename, 'rb'))
         ciphertext, t = data['ciphertext'], data['t']
         matrix_pows = data['matrix_pows']
+        plaintext1 = data['plaintext1']
     else:
         # This takes around 20 seconds.  Pickling it saves some time while
         # fiddling with the system of simultaneous equations.
         # Longer-term we will need to generate multiple ciphertexts, so we
         # may just write these into the file as multiple ciphertexts as well.
+        plaintext1 = generate_plaintext(num_blocks).encode()
         ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
                                     tag_bits=64)
 
@@ -446,6 +462,7 @@ def get_precomputed_structures() -> Tuple[bytes, int, List[Matrix]]:
             'ciphertext': ciphertext,
             't': t,
             'matrix_pows': matrix_pows,
+            'plaintext1': plaintext1,
         }, open(filename, 'wb'))
 
     return ciphertext, t, matrix_pows
@@ -492,5 +509,7 @@ def test_gcm_encrypt_truncated_mac_attack():
         # ciphertext.
         block_num = (j // 128) + 1
         new_coeffs = coeffs.copy()
-        new_coeffs[block_num] = coeffs[block_num] & ~(1 << j)
-        ad_matrix = calculate_ad(new_coeffs)
+        new_coeffs[block_num] = coeffs[block_num] ^ (1 << j)
+        print('about to compute')
+        ad_matrix = calculate_ad(matrix_pows, coeffs, new_coeffs)
+        print('done computing ad_matrix')
