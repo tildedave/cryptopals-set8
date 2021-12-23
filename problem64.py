@@ -12,7 +12,6 @@ import string
 from typing import Callable, List, TypeVar
 
 from problem63 import (
-    GCM_MODULUS,
     FieldElement,
     gcm_encrypt,
     get_nth_block,
@@ -32,6 +31,7 @@ MatrixSize = 128
 ir_poly = [0] * 129
 ir_poly[0] = ir_poly[1] = ir_poly[2] = ir_poly[7] = ir_poly[128] = 1
 field = galois.GF(2**128, galois.Poly(ir_poly, field=GF2))
+
 
 def make_matrix(size=MatrixSize) -> Matrix:
     m: Matrix = [[]] * size
@@ -173,14 +173,13 @@ def assert_square_matrix(a: Matrix):
             f'Row {i} did not have the expected number of columns ({len(a)})'
 
 
-def matrix_null_space(ctx: FieldContext, a: Matrix):
+def matrix_null_space(a: galois.FieldArray) -> List[galois.FieldArray]:
     """
     Adapted from Algorithm N of TAoCP section 4.6.2
 
     This finds the linearly independency vectors v_i, ..., v_i such that
     A v_i = 0
     """
-    assert_square_matrix(a)
     n = len(a)
     cols = [-1] * n
     r = 0
@@ -195,19 +194,14 @@ def matrix_null_space(ctx: FieldContext, a: Matrix):
                 break
 
         if found:
-            inv = ctx.element_mult(ctx.minus_one, ctx.element_inverse(row[j]))
             # multiply column j of A by -1 / a_kj
-            for i in range(0, n):
-                a[i][j] = ctx.element_mult(a[i][j], inv)
+            a[:, j] *= (-1 * (row[j] ** (-1)))
 
             # now add a_{ki} times column j to column i for all i != j
             for i in range(0, n):
                 if i == j:
                     continue
-                fact = a[k][i]
-                for l in range(0, n):
-                    a[l][i] = ctx.element_add(a[l][i],
-                                              ctx.element_mult(a[l][j], fact))
+                a[:, i] += a[:, j] * a[k][i]
             cols[j] = k
         else:
             # no j
@@ -257,7 +251,8 @@ def test_matrix_multiply():
 
 
 def test_matrix_null_space():
-    knuth_example = [
+    GF13 = galois.GF(13)
+    knuth_example = GF13([
         [0, 0, 0, 0, 0, 0, 0, 0],
         [2, 0, 7, 11, 10, 12, 5, 11],
         [3, 6, 3, 3, 0, 4, 7, 2],
@@ -266,20 +261,20 @@ def test_matrix_null_space():
         [6, 11, 8, 6, 2, 6, 10, 9],
         [5, 11, 7, 10, 0, 11, 6, 12],
         [3, 3, 12, 5, 0, 11, 9, 11],
-    ]
-    results = matrix_null_space(PrimeContext(13), knuth_example)
+    ])
+    results = matrix_null_space(knuth_example)
     assert results == [
         [1, 0, 0, 0, 0, 0, 0, 0],
         [0, 5, 5, 0, 9, 5, 1, 0],
         [0, 9, 11, 9, 10, 12, 0, 1],
     ]
 
-    linearly_independent = [
+    linearly_independent = GF13([
         [1, 0, 5],
         [0, 1, 2],
         [0, 0, 1],
-    ]
-    results = matrix_null_space(PrimeContext(13), linearly_independent)
+    ])
+    results = matrix_null_space(linearly_independent)
     assert len(results) == 0
 
 
@@ -482,7 +477,7 @@ def test_squaring_as_matrix_with_precomputed_powers():
 def test_gcm_encrypt_truncated_mac_attack():
     random.seed(0)
 
-    num_blocks = 2 ** 2  # 17 one day after we have this actually working
+    num_blocks = 2 ** 3  # 17 one day after we have this actually working
     n = int(log2(num_blocks))
     aes_key = ''.join(random.choice(string.ascii_letters) for _ in range(32))
     nonce = ''.join(random.choice(string.ascii_letters) for _ in range(12))
@@ -500,7 +495,8 @@ def test_gcm_encrypt_truncated_mac_attack():
     num_rows = (n - 1) * 128
     num_columns = n * 128
 
-    dependency_matrix = GF2.Zeros((num_rows, num_columns))
+    # this is the dependency matrix in the problem description
+    t_matrix = GF2.Zeros((num_rows, num_columns))
 
     coeffs: List = [0] * (n + 1)
     for i in range(1, n + 1):
@@ -512,3 +508,6 @@ def test_gcm_encrypt_truncated_mac_attack():
         # ciphertext.
         block_num = (j // 128) + 1
         ad_matrix = calculate_ad(n, coeffs, block_num, j % 128)
+        for i in range(num_rows // 128):
+            # Copy row i of ad_matrix into column j of t_matrix
+            t_matrix[(i * 128):(i + 1) * 128, j] = ad_matrix[i]
