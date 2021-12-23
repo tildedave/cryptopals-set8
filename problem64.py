@@ -5,6 +5,8 @@ import galois
 from galois import GF2
 import numpy as np
 from numpy.testing import assert_array_equal
+import os
+import pickle
 import random
 import string
 from typing import Callable, List, TypeVar
@@ -433,10 +435,17 @@ def get_matrix_pows(n):
 
 @lru_cache
 def get_gf2_scalar_matrices():
+    filename = './problem64_gf2_scalar_matrices.p'
+    if os.path.exists(filename):
+        data = pickle.load(open(filename, 'rb'))
+        return data['gf2_scalar_matrices']
+
     matrices = []
     basis_elems = get_basis_elems()
     for i in range(0, 128):
         matrices.append(gf2_scalar_matrix(basis_elems[i]))
+
+    pickle.dump({'gf2_scalar_matrices': matrices}, open(filename, 'wb'))
 
     return matrices
 
