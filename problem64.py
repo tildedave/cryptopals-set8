@@ -431,19 +431,29 @@ def get_matrix_pows(n):
     return matrix_pows
 
 
+@lru_cache
+def get_gf2_scalar_matrices():
+    matrices = []
+    basis_elems = get_basis_elems()
+    for i in range(0, 128):
+        matrices.append(gf2_scalar_matrix(basis_elems[i]))
+
+    return matrices
+
+
 def calculate_ad(n,
                  coeffs: List[FieldElement],
-                 new_coeffs: List[FieldElement],
+                 block_num: int,
+                 bit_flip_position: int,
                  ) -> Matrix:
     matrix_pows = get_matrix_pows(n)
+    scalar_matrices = get_gf2_scalar_matrices()
     ad_matrix = GF2.Zeros((128, 128))
     for i in range(1, len(coeffs)):
-        if coeffs[i] == new_coeffs[i]:
-            assert coeffs[i] + new_coeffs[i] == 0
+        if i != block_num:
             continue
-        # adding is subtraction in GF2
-        flipped_scalar = coeffs[i] + new_coeffs[i]
-        ad_factor = np.matmul(gf2_scalar_matrix(flipped_scalar), matrix_pows[i])
+        ad_factor = np.matmul(scalar_matrices[bit_flip_position],
+                              matrix_pows[i])
         ad_matrix = ad_matrix + ad_factor
 
     return ad_matrix
@@ -492,8 +502,4 @@ def test_gcm_encrypt_truncated_mac_attack():
         # Create the matrix AD that results from flipping the jth bit of the
         # ciphertext.
         block_num = (j // 128) + 1
-        new_coeffs = coeffs.copy()
-        v = coeffs[block_num].vector()
-        v[j % 128] ^= 1
-        new_coeffs[block_num] = field.Vector(v)
-        ad_matrix = calculate_ad(n, coeffs, new_coeffs)
+        ad_matrix = calculate_ad(n, coeffs, block_num, j % 128)
