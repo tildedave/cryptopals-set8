@@ -1,19 +1,17 @@
+from functools import lru_cache
 from math import log2
 from copy import deepcopy
 import galois
 from galois import GF2
 import numpy as np
-import os.path
-import pickle
+from numpy.testing import assert_array_equal
 import random
 import string
-from typing import Callable, Dict, List, Tuple, TypeVar
+from typing import Callable, List, TypeVar
 
 from problem63 import (
     GCM_MODULUS,
     FieldElement,
-    element_add,
-    element_mult,
     gcm_encrypt,
     get_nth_block,
     int_from_bytes,
@@ -238,10 +236,9 @@ def PrimeContext(p):
 def test_matrix_multiply():
     a = np.array([[0, 1], [1, 0]])
     b = np.array([[2, 3], [3, 4]])
-
     ctx = PrimeContext(127)
     assert matrix_multiply(ctx, b, a) == [[3, 2], [4, 3]]
-    assert (b * a).all() == np.array([[3, 2], [4, 3]]).all()
+    assert_array_equal(np.matmul(b, a), np.array([[3, 2], [4, 3]]))
     assert matrix_multiply_divide_and_conquer(ctx, b, a) == \
         [[3, 2], [4, 3]]
 
@@ -329,13 +326,24 @@ def matrix_transpose(a: Matrix) -> Matrix:
     return b
 
 
+@lru_cache
+def get_basis_elems() -> List[galois.FieldArray]:
+    elems: List[galois.FieldArray] = []
+    a = field.primitive_element
+    x = 1
+    for _ in range(0, 128):
+        elems.append(x)
+        x = x * a
+
+    return elems
+
+
 def gf2_scalar_matrix(c: FieldElement) -> Matrix:
     rows: List[np.ndarray] = []
     c_elem = field(c)
-    a = field.primitive_element
+    basis_els = get_basis_elems()
     for i in range(0, 128):
-        basis_elem = a ** i
-        rows.insert(0, (c_elem * basis_elem).vector())
+        rows.insert(0, (c_elem * basis_els[i]).vector())
 
     return GF2(np.vstack(rows).transpose())
 
@@ -369,11 +377,11 @@ def test_scalar_multiplication_vector():
     # (x^2 + x + 1) * (x + 1) == x^3 + 1
     x_plus_one_matrix = gf2_scalar_matrix(3)
     e2 = field(7)
-    result = x_plus_one_matrix * e2.vector()
+    result = np.matmul(x_plus_one_matrix, e2.vector())
     assert field.Vector(result) == field(9)
 
     e3 = field(3)
-    result = x_plus_one_matrix * e3.vector()
+    result = np.matmul(x_plus_one_matrix, e3.vector())
     assert field.Vector(result) == field(5)
 
 
@@ -412,10 +420,22 @@ def generate_plaintext(num_blocks):
     return ciphertext
 
 
-def calculate_ad(matrix_pows: List[Matrix],
+@lru_cache
+def get_matrix_pows(n):
+    matrix_pows = [[[None]]] * (n + 1)
+    sq_matrix = m = gf2_square_matrix()  # Msq (y) = y * y
+    for i in range(1, n + 1):
+        matrix_pows[i] = m
+        m = np.matmul(sq_matrix, m)
+
+    return matrix_pows
+
+
+def calculate_ad(n,
                  coeffs: List[FieldElement],
                  new_coeffs: List[FieldElement],
                  ) -> Matrix:
+    matrix_pows = get_matrix_pows(n)
     ad_matrix = GF2.Zeros((128, 128))
     for i in range(1, len(coeffs)):
         if coeffs[i] == new_coeffs[i]:
@@ -423,62 +443,19 @@ def calculate_ad(matrix_pows: List[Matrix],
             continue
         # adding is subtraction in GF2
         flipped_scalar = coeffs[i] + new_coeffs[i]
-        ad_factor = gf2_scalar_matrix(flipped_scalar) * matrix_pows[i]
+        ad_factor = np.matmul(gf2_scalar_matrix(flipped_scalar), matrix_pows[i])
         ad_matrix = ad_matrix + ad_factor
 
     return ad_matrix
 
 
-def get_precomputed_structures() -> Tuple[bytes, int, bytes]:
-    aes_key = ''.join(random.choice(string.ascii_letters) for _ in range(32))
-    nonce = ''.join(random.choice(string.ascii_letters) for _ in range(12))
-    assert len(nonce.encode()) * 8 == 96
-
-    num_blocks = 2 ** 17
-    n = int(log2(num_blocks))
-
-    filename = './problem64_structures.p'
-    if os.path.exists(filename):
-        data = pickle.load(open(filename, 'rb'))
-        ciphertext, t = data['ciphertext'], data['t']
-        plaintext1 = data['plaintext1']
-    else:
-        # This takes around 20 seconds.  Pickling it saves some time while
-        # fiddling with the system of simultaneous equations.
-        # Longer-term we will need to generate multiple ciphertexts, so we
-        # may just write these into the file as multiple ciphertexts as well.
-        plaintext1 = generate_plaintext(num_blocks).encode()
-        ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
-                                    tag_bits=64)
-
-        pickle.dump({
-            'ciphertext': ciphertext,
-            't': t,
-            'plaintext1': plaintext1,
-        }, open(filename, 'wb'))
-
-    return ciphertext, t, plaintext1
-
-
-def get_matrix_pows():
-    num_blocks = 2 ** 17
-    n = int(log2(num_blocks))
-
-    matrix_pows = [[[None]]] * (n + 1)
-    sq_matrix = m = gf2_square_matrix()  # Msq (y) = y * y
-    for i in range(1, n + 1):
-        matrix_pows[i] = m
-        m = sq_matrix * m
-
-    return matrix_pows
-
-
 def test_squaring_as_matrix_with_precomputed_powers():
-    matrix_pows = get_matrix_pows()
+    n = 17
+    matrix_pows = get_matrix_pows(n)
     e1 = field(3)
     expected = field(3)
     for i in range(1, 17):
-        result = matrix_pows[i] * e1.vector()
+        result = np.matmul(matrix_pows[i], e1.vector())
         expected = expected * expected
         assert field.Vector(result) == expected
 
@@ -486,11 +463,15 @@ def test_squaring_as_matrix_with_precomputed_powers():
 def test_gcm_encrypt_truncated_mac_attack():
     random.seed(0)
 
-    num_blocks = 2 ** 17
+    num_blocks = 2 ** 2  # 17 one day after we have this actually working
     n = int(log2(num_blocks))
+    aes_key = ''.join(random.choice(string.ascii_letters) for _ in range(32))
+    nonce = ''.join(random.choice(string.ascii_letters) for _ in range(12))
+    assert len(nonce.encode()) * 8 == 96
 
-    ciphertext, t, plaintext = get_precomputed_structures()
-    matrix_pows = get_matrix_pows()
+    plaintext1 = generate_plaintext(num_blocks).encode()
+    ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
+                                tag_bits=64)
 
     # The problem (and Ferguson's paper) assume the first block contains just
     # metadata.  It doesn't look like that's the case in the NIST document (I
@@ -500,16 +481,12 @@ def test_gcm_encrypt_truncated_mac_attack():
     num_rows = (n - 1) * 128
     num_columns = n * 128
 
-    dependency_matrix = [[]] * num_rows
-    for i in range(num_rows):
-        dependency_matrix[i] = [0] * num_columns
+    dependency_matrix = GF2.Zeros((num_rows, num_columns))
 
     coeffs: List = [0] * (n + 1)
     for i in range(1, n + 1):
         # Extract block 2**i from ciphertext
         coeffs[i] = field(int_from_bytes(get_nth_block(ciphertext, 2**i)))
-
-    print(coeffs)
 
     for j in range(num_columns):
         # Create the matrix AD that results from flipping the jth bit of the
@@ -519,5 +496,4 @@ def test_gcm_encrypt_truncated_mac_attack():
         v = coeffs[block_num].vector()
         v[j % 128] ^= 1
         new_coeffs[block_num] = field.Vector(v)
-        print(j)
-        ad_matrix = calculate_ad(matrix_pows, coeffs, new_coeffs)
+        ad_matrix = calculate_ad(n, coeffs, new_coeffs)
