@@ -359,5 +359,5 @@ def test_gcm_encrypt_truncated_mac_attack():
             done = True
 
         count += 1
-        if count > 2 ** 8:
+        if count > 2 ** (tag_bits // 2):
             assert False, 'did not find candidate in time'
