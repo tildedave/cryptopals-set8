@@ -1,7 +1,9 @@
+from copy import copy
 from functools import lru_cache
 from math import log2
 import galois
 from galois import GF2
+import itertools
 import numpy as np
 from numpy.testing import assert_array_equal
 import os
@@ -13,6 +15,7 @@ from typing import Callable, List, TypeVar
 from problem63 import (
     FieldElement,
     gcm_encrypt,
+    gcm_mac,
     get_nth_block,
     int_from_bytes,
 )
@@ -40,10 +43,10 @@ def matrix_null_space(a: galois.FieldArray):
     aug_array[:, 0:rows] = a.transpose()
     aug_array[:, rows:] = a.Identity(cols)
     reduced = aug_array.row_reduce(ncols=rows)
-    zero_rows, = np.where(~reduced[0:cols, 0:cols].any(axis=1))
+    zero_rows, = np.where(~reduced[0:cols, 0:rows].any(axis=1))
     results = []
     for row in zero_rows:
-        results.append(reduced[row, cols:])
+        results.append(reduced[row, rows:])
 
     return results
 
@@ -72,6 +75,17 @@ def test_matrix_null_space():
     ])
     results = matrix_null_space(linearly_independent)
     assert len(results) == 0
+
+    GF6199 = galois.GF(6199)
+    so_example = GF6199([
+        [1, 0, 2, 6199-3],
+        [0, 1, 6199-1, 2],
+        [0, 0, 0, 0],
+    ])
+    results = matrix_null_space(so_example)
+    assert len(results) == 2
+    for result in results:
+        assert np.matmul(so_example, result).all() == GF6199.Zeros((4)).all()
 
 
 def element_to_gf2_element(c: FieldElement) -> Vec:
@@ -264,10 +278,27 @@ def test_squaring_as_matrix_with_precomputed_powers():
         assert field.Vector(result) == expected
 
 
+def apply_bitflips(ciphertext, flip_vector):
+    forged_text = bytearray(ciphertext)
+    for i, should_flip in enumerate(flip_vector):
+        if should_flip:
+            block_num, bit_pos = divmod(i, 128)
+            modify_block_num = 2 ** (block_num + 1)
+            # must take block_num and convert to which position in the
+            # ciphertext array
+            byte_pos, bit_shift_num = divmod(bit_pos, 8)
+            bytes_per_block = 128 // 8
+            start = (modify_block_num - 1) * bytes_per_block
+            forged_text[start + byte_pos] ^= (1 << bit_shift_num)
+
+    return forged_text
+
+
 def test_gcm_encrypt_truncated_mac_attack():
     random.seed(0)
 
-    num_blocks = 2 ** 17  # 17 one day after we have this actually working
+    tag_bits = 16
+    num_blocks = 2 ** (tag_bits // 2 + 1)
     n = int(log2(num_blocks))
     aes_key = ''.join(random.choice(string.ascii_letters) for _ in range(32))
     nonce = ''.join(random.choice(string.ascii_letters) for _ in range(12))
@@ -275,7 +306,7 @@ def test_gcm_encrypt_truncated_mac_attack():
 
     plaintext1 = generate_plaintext(num_blocks).encode()
     ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
-                                tag_bits=64)
+                                tag_bits=tag_bits)
 
     # The problem (and Ferguson's paper) assume the first block contains just
     # metadata.  It doesn't look like that's the case in the NIST document (I
@@ -301,8 +332,36 @@ def test_gcm_encrypt_truncated_mac_attack():
         ad_matrix = calculate_ad(n, coeffs, block_num, j % 128)
         for i in range(num_rows // 128):
             # Copy row i of ad_matrix into column j of t_matrix
-            t_matrix[(i * 128):(i + 1) * 128, j] = ad_matrix[i,:]
-
-    print('null space computation time')
+            t_matrix[(i * 128):(i + 1) * 128, j] = ad_matrix[i, :]
     results = matrix_null_space(t_matrix)
-    print(results)
+    assert len(results) == 128  # sure
+
+    associated_bitlen = (0).to_bytes(8, byteorder='big')
+    cipher_bitlen = (len(plaintext1) * 8).to_bytes(8, byteorder='big')
+    length_block = associated_bitlen + cipher_bitlen
+
+    # all 2^i combinations
+    done = False
+    count = 0
+
+    while not done:
+        v = GF2.Zeros(num_columns)
+        vector_list = random.sample(results, random.randint(1, len(results)))
+        for vector in vector_list:
+            v += vector
+
+        forged_ciphertext = apply_bitflips(ciphertext, v.vector())
+        forged_text_tag = gcm_mac(forged_ciphertext, b'', length_block,
+                                    aes_key, nonce.encode(),
+                                    tag_bits=tag_bits)
+
+        if forged_text_tag == t:
+            print('success!!!!!!!!!', v)
+            print(forged_ciphertext, ciphertext)
+            breakpoint()
+            done = True
+
+        count += 1
+        print(count)
+        if count % 1000 == 0:
+            print(count)

@@ -674,8 +674,7 @@ def gcm_mac(ciphertext: bytes,
     s = int.from_bytes(aes_encrypt(j0, aes_key), byteorder='big')
     t = element_add(g, s)
 
-    # MSB calculation - invert a zero mask
-    return (~((1 << (128 - tag_bits)) - 1)) & t
+    return int_from_bytes(t.to_bytes(128 // 8, byteorder='big')[0:tag_bits // 8])
 
 
 def gcm_decrypt(ciphertext: bytes,
