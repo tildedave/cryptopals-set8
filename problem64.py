@@ -12,6 +12,7 @@ from typing import Callable, List, TypeVar
 
 from problem63 import (
     FieldElement,
+    aes_encrypt,
     gcm_encrypt,
     gcm_mac,
     get_nth_block,
@@ -306,6 +307,15 @@ def test_gcm_encrypt_truncated_mac_attack():
     ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
                                 tag_bits=tag_bits)
 
+    coeffs: List = [0] * (n + 1)
+    for i in range(1, n + 1):
+        # Extract block 2**i from ciphertext
+        coeffs[i] = field(int_from_bytes(get_nth_block(ciphertext, 2**i)))
+
+    associated_bitlen = (0).to_bytes(8, byteorder='big')
+    cipher_bitlen = (len(plaintext1) * 8).to_bytes(8, byteorder='big')
+    length_block = associated_bitlen + cipher_bitlen
+
     # The problem (and Ferguson's paper) assume the first block contains just
     # metadata.  It doesn't look like that's the case in the NIST document (I
     # probably just haven't found the appropriate section) or the Problem 63
@@ -314,13 +324,25 @@ def test_gcm_encrypt_truncated_mac_attack():
     num_rows = (n - 1) * 128
     num_columns = n * 128
 
+    # Let's validate that AD works the way we think it does
+    print('validate ad time')
+    bytes_per_block = 128 // 8
+    h = int_from_bytes(aes_encrypt(bytes(bytes_per_block), aes_key))
+    for i in range(0, 128):
+        flip_vector = GF2.Zeros(num_columns)
+        flip_vector[i] = 1
+        flipped_ciphertext = apply_bitflips(ciphertext, flip_vector)
+
+        ad = calculate_ad(n, coeffs, 1, i)
+        matrix_result = np.matmul(ad, field(h).vector())
+        # result should be the same as if we gcm_mac
+        hash_result = gcm_mac(flipped_ciphertext, b'', length_block, aes_key,
+                              nonce.encode(), tag_bits=128)
+        assert field.Vector(matrix_result) == field(hash_result), \
+            'AD calculation did not match as expected'
+
     # this is the dependency matrix in the problem description
     t_matrix = GF2.Zeros((num_rows, num_columns))
-
-    coeffs: List = [0] * (n + 1)
-    for i in range(1, n + 1):
-        # Extract block 2**i from ciphertext
-        coeffs[i] = field(int_from_bytes(get_nth_block(ciphertext, 2**i)))
 
     print('t_matrix generation time')
     for j in range(num_columns):
@@ -333,10 +355,6 @@ def test_gcm_encrypt_truncated_mac_attack():
             t_matrix[(i * 128):(i + 1) * 128, j] = ad_matrix[i, :]
     results = matrix_null_space(t_matrix)
     assert len(results) == 128  # sure
-
-    associated_bitlen = (0).to_bytes(8, byteorder='big')
-    cipher_bitlen = (len(plaintext1) * 8).to_bytes(8, byteorder='big')
-    length_block = associated_bitlen + cipher_bitlen
 
     # all 2^i combinations
     done = False
