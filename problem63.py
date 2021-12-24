@@ -631,19 +631,16 @@ def ctr_aes(plaintext: bytes,
         cb = bytes(nonce) + block_num.to_bytes(4, byteorder='big')
         cb_block = int_from_bytes(aes_encrypt(cb, aes_key))
         b = int_from_bytes(get_nth_block(plaintext, block_num))
-        cipherblock = element_add(b, cb_block).to_bytes(bytes_per_block,
-                                                        byteorder='big')
+        e = element_add(b, cb_block)
 
         if block_num == num_blocks:
             # Last block.  Must zero out anything after the end.
-            # This is sort of annoying; I had issues getting masking to work
             nonzero_bytes = plaintext_length % bytes_per_block
-            cipherblock = bytearray(cipherblock)
-            if nonzero_bytes != 0:
-                for i in range(nonzero_bytes, bytes_per_block):
-                    cipherblock[i] = 0
+            if nonzero_bytes > 0:
+                zero_bytes = bytes_per_block - nonzero_bytes
+                e &= ~((1 << ((zero_bytes * 8) + 1)) - 1)
 
-        ciphertext += cipherblock
+        ciphertext += e.to_bytes(bytes_per_block, byteorder='big')
         block_num += 1
 
     return ciphertext
@@ -674,7 +671,8 @@ def gcm_mac(ciphertext: bytes,
     s = int.from_bytes(aes_encrypt(j0, aes_key), byteorder='big')
     t = element_add(g, s)
 
-    return int_from_bytes(t.to_bytes(128 // 8, byteorder='big')[0:tag_bits // 8])
+    # Take only the most significant bits
+    return t >> (128 - tag_bits)
 
 
 def gcm_decrypt(ciphertext: bytes,
