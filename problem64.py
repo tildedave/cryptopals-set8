@@ -1,9 +1,7 @@
-from copy import copy
 from functools import lru_cache
 from math import log2
 import galois
 from galois import GF2
-import itertools
 import numpy as np
 from numpy.testing import assert_array_equal
 import os
@@ -352,16 +350,14 @@ def test_gcm_encrypt_truncated_mac_attack():
 
         forged_ciphertext = apply_bitflips(ciphertext, v.vector())
         forged_text_tag = gcm_mac(forged_ciphertext, b'', length_block,
-                                    aes_key, nonce.encode(),
-                                    tag_bits=tag_bits)
+                                  aes_key, nonce.encode(),
+                                  tag_bits=tag_bits)
 
         if forged_text_tag == t:
             print('success!!!!!!!!!', v)
             print(forged_ciphertext, ciphertext)
-            breakpoint()
             done = True
 
         count += 1
-        print(count)
-        if count % 1000 == 0:
-            print(count)
+        if count > 2 ** 8:
+            assert False, 'did not find candidate in time'
