@@ -646,15 +646,9 @@ def ctr_aes(plaintext: bytes,
     return ciphertext
 
 
-def gcm_mac(ciphertext: bytes,
-            associated_data: bytes,
-            length_block: bytes,
-            aes_key: str,
-            nonce: bytes,
-            tag_bits: int = 128) -> int:
+def gcm_mac_compute_g(total_bytes: bytes, aes_key: str):
     bytes_per_block = 128 // 8
     block_num = 1
-    total_bytes = associated_data + ciphertext + length_block
 
     h = int_from_bytes(aes_encrypt(bytes(bytes_per_block), aes_key))
     g = 0
@@ -666,11 +660,21 @@ def gcm_mac(ciphertext: bytes,
         g = element_mult(g, h, GCM_MODULUS)
         block_num += 1
 
+    return g
+
+
+def gcm_mac(ciphertext: bytes,
+            associated_data: bytes,
+            length_block: bytes,
+            aes_key: str,
+            nonce: bytes,
+            tag_bits: int = 128) -> int:
+    total_bytes = associated_data + ciphertext + length_block
+    g = gcm_mac_compute_g(total_bytes, aes_key)
     # '1' block is length (128 - 96) // 8 = 4
     j0 = bytes(nonce) + (1).to_bytes(4, byteorder='big')
     s = int.from_bytes(aes_encrypt(j0, aes_key), byteorder='big')
     t = element_add(g, s)
-
     # Take only the most significant bits
     return t >> (128 - tag_bits)
 

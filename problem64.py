@@ -11,10 +11,14 @@ import string
 from typing import Callable, List, TypeVar
 
 from problem63 import (
+    GCM_MODULUS,
     FieldElement,
     aes_encrypt,
+    element_add,
+    element_mult,
     gcm_encrypt,
     gcm_mac,
+    gcm_mac_compute_g,
     get_nth_block,
     int_from_bytes,
 )
@@ -224,11 +228,27 @@ def generate_plaintext(num_blocks):
 def get_matrix_pows(n):
     matrix_pows = [[[None]]] * (n + 1)
     sq_matrix = m = gf2_square_matrix()  # Msq (y) = y * y
+    matrix_pows[0] = GF2.Identity(128)
     for i in range(1, n + 1):
         matrix_pows[i] = m
         m = np.matmul(sq_matrix, m)
 
     return matrix_pows
+
+
+def test_matrix_pows():
+    matrix_pows = get_matrix_pows(17)
+    for _ in range(0, 10):
+        x = field.Random()
+        x_vec = x.vector()
+        for i in range(0, len(matrix_pows)):
+            matrix_result = field.Vector(np.matmul(matrix_pows[i], x_vec))
+            assert matrix_result == (x ** (2 ** i))
+
+
+def test_scalar_matrix():
+    pass
+
 
 
 @lru_cache
@@ -283,14 +303,14 @@ def apply_bitflips(ciphertext, flip_vector):
         if should_flip:
             block_num, bit_pos = divmod(i, 128)
             modify_block_num = 2 ** (block_num + 1)
-            # must take block_num and convert to which position in the
-            # ciphertext array
+            # Must figure out how to flip bit_pos within the block
+            # Block starts at "start", ends at "start + bytes_per_block"
             byte_pos, bit_shift_num = divmod(bit_pos, 8)
             bytes_per_block = 128 // 8
             start = (modify_block_num - 1) * bytes_per_block
-            forged_text[start + byte_pos] ^= (1 << bit_shift_num)
+            forged_text[start + byte_pos] ^= (1 << (7 - bit_shift_num))
 
-    return forged_text
+    return bytes(forged_text)
 
 
 def test_gcm_encrypt_truncated_mac_attack():
@@ -328,17 +348,25 @@ def test_gcm_encrypt_truncated_mac_attack():
     print('validate ad time')
     bytes_per_block = 128 // 8
     h = int_from_bytes(aes_encrypt(bytes(bytes_per_block), aes_key))
+
     for i in range(0, 128):
         flip_vector = GF2.Zeros(num_columns)
         flip_vector[i] = 1
         flipped_ciphertext = apply_bitflips(ciphertext, flip_vector)
 
-        ad = calculate_ad(n, coeffs, 1, i)
+        ad = calculate_ad(n, coeffs, block_num=1, bit_flip_position=i)
         matrix_result = np.matmul(ad, field(h).vector())
-        # result should be the same as if we gcm_mac
-        hash_result = gcm_mac(flipped_ciphertext, b'', length_block, aes_key,
-                              nonce.encode(), tag_bits=128)
-        assert field.Vector(matrix_result) == field(hash_result), \
+
+        block_num = 1
+        total_bytes = ciphertext + length_block
+        total_flipped_ciphertext = flipped_ciphertext + length_block
+
+        original_result = gcm_mac_compute_g(total_bytes, aes_key)
+        flipped_result = gcm_mac_compute_g(total_flipped_ciphertext, aes_key)
+
+        # Original value is 73870349645317180386927515316401291484
+        assert field.Vector(matrix_result) == \
+            field(flipped_result ^ original_result), \
             'AD calculation did not match as expected'
 
     # this is the dependency matrix in the problem description
