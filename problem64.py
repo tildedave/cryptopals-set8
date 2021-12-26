@@ -34,8 +34,15 @@ Matrix = List[Vec]
 MatrixSize = 128
 
 ir_poly = [0] * 129
-ir_poly[0] = ir_poly[1] = ir_poly[2] = ir_poly[7] = ir_poly[128] = 1
+ir_poly[128] = ir_poly[127] = ir_poly[126] = ir_poly[121] = ir_poly[0] = 1
 field = galois.GF(2**128, galois.Poly(ir_poly, field=GF2))
+
+
+def test_field_and_element_mult_consistency():
+    for _ in range(200):
+        x, y = field.Random(), field.Random()
+        x_, y_ = int(x), int(y)
+        assert element_mult(x_, y_, GCM_MODULUS) == x * y
 
 
 def matrix_null_space(a: galois.FieldArray):
@@ -188,6 +195,11 @@ def test_scalar_multiplication_vector():
     result = np.matmul(x_plus_one_matrix, e3.vector())
     assert field.Vector(result) == field(5)
 
+    for _ in range(10):
+        x, y = field.Random(), field.Random()
+        result = np.matmul(gf2_scalar_matrix(x), y.vector())
+        assert field.Vector(result) == x * y
+
 
 def gf2_square_matrix() -> GF2:
     rows: List[np.ndarray] = []
@@ -246,11 +258,6 @@ def test_matrix_pows():
             assert matrix_result == (x ** (2 ** i))
 
 
-def test_scalar_matrix():
-    pass
-
-
-
 @lru_cache
 def get_gf2_scalar_matrices():
     filename = './problem64_gf2_scalar_matrices.p'
@@ -261,7 +268,7 @@ def get_gf2_scalar_matrices():
     matrices = []
     basis_elems = get_basis_elems()
     for i in range(0, 128):
-        matrices.append(gf2_scalar_matrix(basis_elems[i]))
+        matrices.insert(0, gf2_scalar_matrix(basis_elems[i]))
 
     pickle.dump({'gf2_scalar_matrices': matrices}, open(filename, 'wb'))
 
@@ -270,14 +277,14 @@ def get_gf2_scalar_matrices():
 
 def calculate_ad(n,
                  coeffs: List[FieldElement],
-                 block_num: int,
+                 block_num_pow_2: int,
                  bit_flip_position: int,
                  ) -> Matrix:
     matrix_pows = get_matrix_pows(n)
     scalar_matrices = get_gf2_scalar_matrices()
     ad_matrix = GF2.Zeros((128, 128))
     for i in range(1, len(coeffs)):
-        if i != block_num:
+        if i != block_num_pow_2:
             continue
         ad_factor = np.matmul(scalar_matrices[bit_flip_position],
                               matrix_pows[i])
@@ -313,6 +320,60 @@ def apply_bitflips(ciphertext, flip_vector):
     return bytes(forged_text)
 
 
+def test_validate_ad():
+    random.seed(0)
+    aes_key = ''.join(random.choice(string.ascii_letters) for _ in range(32))
+    nonce = ''.join(random.choice(string.ascii_letters) for _ in range(12))
+    num_blocks = 2 ** 2
+    n = int(log2(num_blocks))
+
+    plaintext = generate_plaintext(num_blocks).encode()
+    ciphertext, t = gcm_encrypt(plaintext, b'', aes_key, nonce.encode())
+
+    # Let's validate that AD works the way we think it does
+    bytes_per_block = 128 // 8
+    h = int_from_bytes(aes_encrypt(bytes(bytes_per_block), aes_key))
+
+    num_rows = (n - 1) * 128
+    num_columns = n * 128
+
+    associated_bitlen = (0).to_bytes(8, byteorder='big')
+    cipher_bitlen = (len(plaintext) * 8).to_bytes(8, byteorder='big')
+    length_block = associated_bitlen + cipher_bitlen
+
+    coeffs: List = [0] * (n + 1)
+    for i in range(1, n + 1):
+        # Extract block 2**i from ciphertext
+        coeffs[i] = field(int_from_bytes(get_nth_block(ciphertext, 2**i)))
+
+    for i in range(0, 128):
+        flip_vector = GF2.Zeros(num_columns)
+        flip_vector[i] = 1
+        flipped_ciphertext = apply_bitflips(ciphertext, flip_vector)
+
+        ad = calculate_ad(n, coeffs, block_num_pow_2=1, bit_flip_position=i)
+        matrix_result = np.matmul(ad, field(h).vector())
+
+        total_bytes = ciphertext + length_block
+        total_flipped_ciphertext = flipped_ciphertext + length_block
+
+        original_result = gcm_mac_compute_g(total_bytes, aes_key)
+        flipped_result = gcm_mac_compute_g(total_flipped_ciphertext, aes_key)
+
+        # Another way to get this result
+        x = field(int_from_bytes(get_nth_block(total_bytes, 2)))
+        y = field(int_from_bytes(get_nth_block(total_flipped_ciphertext, 2)))
+        direct_computation_result = (x - y) * (field(h) ** 2)
+
+        assert direct_computation_result == field.Vector(matrix_result), \
+            'Matrix computation did not match as expected'
+
+        # Original value is 73870349645317180386927515316401291484
+        assert field.Vector(matrix_result) == \
+            field(flipped_result ^ original_result), \
+            'AD calculation did not match as expected'
+
+
 def test_gcm_encrypt_truncated_mac_attack():
     random.seed(0)
 
@@ -343,31 +404,6 @@ def test_gcm_encrypt_truncated_mac_attack():
     # be consistent with the instructions.
     num_rows = (n - 1) * 128
     num_columns = n * 128
-
-    # Let's validate that AD works the way we think it does
-    print('validate ad time')
-    bytes_per_block = 128 // 8
-    h = int_from_bytes(aes_encrypt(bytes(bytes_per_block), aes_key))
-
-    for i in range(0, 128):
-        flip_vector = GF2.Zeros(num_columns)
-        flip_vector[i] = 1
-        flipped_ciphertext = apply_bitflips(ciphertext, flip_vector)
-
-        ad = calculate_ad(n, coeffs, block_num=1, bit_flip_position=i)
-        matrix_result = np.matmul(ad, field(h).vector())
-
-        block_num = 1
-        total_bytes = ciphertext + length_block
-        total_flipped_ciphertext = flipped_ciphertext + length_block
-
-        original_result = gcm_mac_compute_g(total_bytes, aes_key)
-        flipped_result = gcm_mac_compute_g(total_flipped_ciphertext, aes_key)
-
-        # Original value is 73870349645317180386927515316401291484
-        assert field.Vector(matrix_result) == \
-            field(flipped_result ^ original_result), \
-            'AD calculation did not match as expected'
 
     # this is the dependency matrix in the problem description
     t_matrix = GF2.Zeros((num_rows, num_columns))
