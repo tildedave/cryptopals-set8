@@ -293,6 +293,22 @@ def calculate_ad(n,
     return ad_matrix
 
 
+def calculate_ad2(n,
+                  coeffs: List[FieldElement],
+                  flip_vector,
+                  ) -> Matrix:
+    matrix_pows = get_matrix_pows(n)
+    ad_matrix = GF2.Zeros((128, 128))
+    for i in range(1, len(coeffs)):
+        start = (i - 1) * 128
+        flip_int = field.Vector(flip_vector[start: start + 128])
+        ad_factor = np.matmul(gf2_scalar_matrix(flip_int),
+                              matrix_pows[i])
+        ad_matrix += ad_factor
+
+    return ad_matrix
+
+
 def test_squaring_as_matrix_with_precomputed_powers():
     n = 17
     matrix_pows = get_matrix_pows(n)
@@ -333,6 +349,10 @@ def reverse_blocks(ciphertext: bytes):
     return bytes(reversed_ciphertext)
 
 
+def field_from_bytes(b: bytes) -> galois.FieldArray:
+    return field(int_from_bytes(b))
+
+
 def test_validate_ad():
     random.seed(0)
     aes_key = ''.join(random.choice(string.ascii_letters) for _ in range(32))
@@ -347,7 +367,6 @@ def test_validate_ad():
     bytes_per_block = 128 // 8
     h = int_from_bytes(aes_encrypt(bytes(bytes_per_block), aes_key))
 
-    num_rows = (n - 1) * 128
     num_columns = n * 128
 
     associated_bitlen = (0).to_bytes(8, byteorder='big')
@@ -379,9 +398,10 @@ def test_validate_ad():
                                            aes_key)
 
         # Another way to get this result
-        x = field(int_from_bytes(get_nth_block(reversed_total_bytes, 2 ** block_idx)))
-        y = field(int_from_bytes(get_nth_block(flipped_ciphertext, 2 ** block_idx)))
-        direct_computation_result = (x - y) * (field(h) ** (2 ** block_idx))
+        block_num = 2 ** block_idx
+        x = field_from_bytes(get_nth_block(reversed_total_bytes, block_num))
+        y = field_from_bytes(get_nth_block(flipped_ciphertext, block_num))
+        direct_computation_result = (x - y) * (field(h) ** block_num)
 
         expected_result = field(flipped_result ^ original_result)
         assert direct_computation_result == expected_result, \
@@ -405,7 +425,9 @@ def test_gcm_encrypt_truncated_mac_attack():
     nonce = ''.join(random.choice(string.ascii_letters) for _ in range(12))
     assert len(nonce.encode()) * 8 == 96
 
+    print('-----> generate plaintext')
     plaintext1 = generate_plaintext(num_blocks).encode()
+    print('-----> run gcm_encryption')
     ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
                                 tag_bits=tag_bits)
 
@@ -435,13 +457,17 @@ def test_gcm_encrypt_truncated_mac_attack():
         for i in range(num_rows // 128):
             # Copy row i of ad_matrix into column j of t_matrix
             t_matrix[(i * 128):(i + 1) * 128, j] = ad_matrix[i, :]
+    print('-----> matrix null space')
     results = matrix_null_space(t_matrix)
     assert len(results) == 128
 
     # all 2^i combinations
     done = False
     count = 0
+    h = field_from_bytes(aes_encrypt(bytes(128 // 8), aes_key))
 
+    print('-----> testing vectors in null space to find forgery')
+    # not certain this is working as described
     while not done:
         v = GF2.Zeros(num_columns)
         vector_list = random.sample(results, random.randint(1, len(results)))
@@ -455,10 +481,15 @@ def test_gcm_encrypt_truncated_mac_attack():
                                   tag_bits=tag_bits)
 
         if forged_text_tag == t:
-            print('success!!!!!!!!!', v)
-            print(forged_ciphertext, ciphertext)
+            ad = calculate_ad2(n, coeffs, v)
+            k = ad[:tag_bits // 2]
+            assert not np.matmul(k, h.vector()).any(), \
+                'h should have been in null space of K'
+
             done = True
 
         count += 1
-        if count > 2 ** (tag_bits // 2):
+        if count % 1000 == 0:
+            print(count)
+        if count > 2 ** tag_bits:
             assert False, 'did not find candidate in time'
