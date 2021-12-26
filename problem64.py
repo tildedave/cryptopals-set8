@@ -277,14 +277,14 @@ def get_gf2_scalar_matrices():
 
 def calculate_ad(n,
                  coeffs: List[FieldElement],
-                 block_num_pow_2: int,
+                 block_idx: int,
                  bit_flip_position: int,
                  ) -> Matrix:
     matrix_pows = get_matrix_pows(n)
     scalar_matrices = get_gf2_scalar_matrices()
     ad_matrix = GF2.Zeros((128, 128))
     for i in range(1, len(coeffs)):
-        if i != block_num_pow_2:
+        if i != block_idx:
             continue
         ad_factor = np.matmul(scalar_matrices[bit_flip_position],
                               matrix_pows[i])
@@ -308,8 +308,8 @@ def apply_bitflips(ciphertext, flip_vector):
     forged_text = bytearray(ciphertext)
     for i, should_flip in enumerate(flip_vector):
         if should_flip:
-            block_num, bit_pos = divmod(i, 128)
-            modify_block_num = 2 ** (block_num + 1)
+            block_idx, bit_pos = divmod(i, 128)
+            modify_block_num = 2 ** (block_idx + 1)
             byte_pos, bit_shift_num = divmod(bit_pos, 8)
             bytes_per_block = 128 // 8
             start = (modify_block_num - 1) * bytes_per_block
@@ -337,7 +337,7 @@ def test_validate_ad():
     random.seed(0)
     aes_key = ''.join(random.choice(string.ascii_letters) for _ in range(32))
     nonce = ''.join(random.choice(string.ascii_letters) for _ in range(12))
-    num_blocks = 2 ** 2
+    num_blocks = 2 ** 4
     n = int(log2(num_blocks))
 
     plaintext = generate_plaintext(num_blocks - 1).encode()
@@ -363,12 +363,15 @@ def test_validate_ad():
         block = get_nth_block(reversed_total_bytes, block_num)
         coeffs[i] = field(int_from_bytes(block))
 
-    for i in range(0, 128):
+    for i in range(0, num_columns):
         flip_vector = GF2.Zeros(num_columns)
         flip_vector[i] = 1
         flipped_ciphertext = apply_bitflips(reversed_total_bytes, flip_vector)
 
-        ad = calculate_ad(n, coeffs, block_num_pow_2=1, bit_flip_position=i)
+        block_idx, bit_flip_position = divmod(i, 128)
+        block_idx += 1
+        ad = calculate_ad(n, coeffs, block_idx=block_idx,
+                          bit_flip_position=bit_flip_position)
         matrix_result = np.matmul(ad, field(h).vector())
 
         original_result = gcm_mac_compute_g(total_bytes, aes_key)
@@ -376,9 +379,9 @@ def test_validate_ad():
                                            aes_key)
 
         # Another way to get this result
-        x = field(int_from_bytes(get_nth_block(reversed_total_bytes, 2)))
-        y = field(int_from_bytes(get_nth_block(flipped_ciphertext, 2)))
-        direct_computation_result = (x - y) * (field(h) ** 2)
+        x = field(int_from_bytes(get_nth_block(reversed_total_bytes, 2 ** block_idx)))
+        y = field(int_from_bytes(get_nth_block(flipped_ciphertext, 2 ** block_idx)))
+        direct_computation_result = (x - y) * (field(h) ** (2 ** block_idx))
 
         expected_result = field(flipped_result ^ original_result)
         assert direct_computation_result == expected_result, \
@@ -406,14 +409,17 @@ def test_gcm_encrypt_truncated_mac_attack():
     ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
                                 tag_bits=tag_bits)
 
-    coeffs: List = [0] * (n + 1)
-    for i in range(1, n + 1):
-        # Extract block 2**i from ciphertext
-        coeffs[i] = field(int_from_bytes(get_nth_block(ciphertext, 2**i)))
-
     associated_bitlen = (0).to_bytes(8, byteorder='big')
     cipher_bitlen = (len(plaintext1) * 8).to_bytes(8, byteorder='big')
     length_block = associated_bitlen + cipher_bitlen
+    total_bytes = ciphertext + length_block
+    reversed_total_bytes = reverse_blocks(total_bytes)
+
+    coeffs: List = [0] * (n + 1)
+    for i in range(1, n + 1):
+        block_num = 2**i
+        block = get_nth_block(reversed_total_bytes, block_num)
+        coeffs[i] = field(int_from_bytes(block))
 
     num_rows = (n - 1) * 128
     num_columns = n * 128
@@ -421,7 +427,6 @@ def test_gcm_encrypt_truncated_mac_attack():
     # this is the dependency matrix in the problem description
     t_matrix = GF2.Zeros((num_rows, num_columns))
 
-    print('t_matrix generation time')
     for j in range(num_columns):
         # Create the matrix AD that results from flipping the jth bit of the
         # ciphertext.
@@ -431,7 +436,7 @@ def test_gcm_encrypt_truncated_mac_attack():
             # Copy row i of ad_matrix into column j of t_matrix
             t_matrix[(i * 128):(i + 1) * 128, j] = ad_matrix[i, :]
     results = matrix_null_space(t_matrix)
-    assert len(results) == 128  # sure
+    assert len(results) == 128
 
     # all 2^i combinations
     done = False
@@ -443,8 +448,9 @@ def test_gcm_encrypt_truncated_mac_attack():
         for vector in vector_list:
             v += vector
 
-        forged_ciphertext = apply_bitflips(ciphertext, v.vector())
-        forged_text_tag = gcm_mac(forged_ciphertext, b'', length_block,
+        forged_ciphertext = apply_bitflips(reversed_total_bytes, v.vector())
+        forged_text_tag = gcm_mac(reverse_blocks(forged_ciphertext), b'',
+                                  length_block,
                                   aes_key, nonce.encode(),
                                   tag_bits=tag_bits)
 
