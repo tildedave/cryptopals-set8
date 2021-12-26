@@ -310,14 +310,27 @@ def apply_bitflips(ciphertext, flip_vector):
         if should_flip:
             block_num, bit_pos = divmod(i, 128)
             modify_block_num = 2 ** (block_num + 1)
-            # Must figure out how to flip bit_pos within the block
-            # Block starts at "start", ends at "start + bytes_per_block"
             byte_pos, bit_shift_num = divmod(bit_pos, 8)
             bytes_per_block = 128 // 8
             start = (modify_block_num - 1) * bytes_per_block
             forged_text[start + byte_pos] ^= (1 << (7 - bit_shift_num))
 
     return bytes(forged_text)
+
+
+def reverse_blocks(ciphertext: bytes):
+    """
+    Our bit-flipping operates on the original text but in reverse
+    """
+    reversed_ciphertext = bytearray()
+    bytes_per_block = 128 // 8
+    num_blocks = len(ciphertext) // (bytes_per_block)
+    assert ~(num_blocks & (num_blocks - 1)), \
+        f'{num_blocks} must be a power of 2'
+    for i in range(num_blocks, 0, -1):
+        reversed_ciphertext += get_nth_block(ciphertext, i)
+
+    return bytes(reversed_ciphertext)
 
 
 def test_validate_ad():
@@ -327,7 +340,7 @@ def test_validate_ad():
     num_blocks = 2 ** 2
     n = int(log2(num_blocks))
 
-    plaintext = generate_plaintext(num_blocks).encode()
+    plaintext = generate_plaintext(num_blocks - 1).encode()
     ciphertext, t = gcm_encrypt(plaintext, b'', aes_key, nonce.encode())
 
     # Let's validate that AD works the way we think it does
@@ -340,35 +353,40 @@ def test_validate_ad():
     associated_bitlen = (0).to_bytes(8, byteorder='big')
     cipher_bitlen = (len(plaintext) * 8).to_bytes(8, byteorder='big')
     length_block = associated_bitlen + cipher_bitlen
+    total_bytes = ciphertext + length_block
+
+    reversed_total_bytes = reverse_blocks(total_bytes)
 
     coeffs: List = [0] * (n + 1)
-    for i in range(1, n + 1):
-        # Extract block 2**i from ciphertext
-        coeffs[i] = field(int_from_bytes(get_nth_block(ciphertext, 2**i)))
+    for i in range(0, n):
+        block_num = 2**i
+        block = get_nth_block(reversed_total_bytes, block_num)
+        coeffs[i] = field(int_from_bytes(block))
 
     for i in range(0, 128):
         flip_vector = GF2.Zeros(num_columns)
         flip_vector[i] = 1
-        flipped_ciphertext = apply_bitflips(ciphertext, flip_vector)
+        flipped_ciphertext = apply_bitflips(reversed_total_bytes, flip_vector)
 
         ad = calculate_ad(n, coeffs, block_num_pow_2=1, bit_flip_position=i)
         matrix_result = np.matmul(ad, field(h).vector())
 
-        total_bytes = ciphertext + length_block
-        total_flipped_ciphertext = flipped_ciphertext + length_block
-
         original_result = gcm_mac_compute_g(total_bytes, aes_key)
-        flipped_result = gcm_mac_compute_g(total_flipped_ciphertext, aes_key)
+        flipped_result = gcm_mac_compute_g(reverse_blocks(flipped_ciphertext),
+                                           aes_key)
 
         # Another way to get this result
-        x = field(int_from_bytes(get_nth_block(total_bytes, 2)))
-        y = field(int_from_bytes(get_nth_block(total_flipped_ciphertext, 2)))
+        x = field(int_from_bytes(get_nth_block(reversed_total_bytes, 2)))
+        y = field(int_from_bytes(get_nth_block(flipped_ciphertext, 2)))
         direct_computation_result = (x - y) * (field(h) ** 2)
+
+        expected_result = field(flipped_result ^ original_result)
+        assert direct_computation_result == expected_result, \
+            'Direct computation did match expected'
 
         assert direct_computation_result == field.Vector(matrix_result), \
             'Matrix computation did not match as expected'
 
-        # Original value is 73870349645317180386927515316401291484
         assert field.Vector(matrix_result) == \
             field(flipped_result ^ original_result), \
             'AD calculation did not match as expected'
@@ -397,11 +415,6 @@ def test_gcm_encrypt_truncated_mac_attack():
     cipher_bitlen = (len(plaintext1) * 8).to_bytes(8, byteorder='big')
     length_block = associated_bitlen + cipher_bitlen
 
-    # The problem (and Ferguson's paper) assume the first block contains just
-    # metadata.  It doesn't look like that's the case in the NIST document (I
-    # probably just haven't found the appropriate section) or the Problem 63
-    # specifications.  In any case we'll just ignore the first block so we can
-    # be consistent with the instructions.
     num_rows = (n - 1) * 128
     num_columns = n * 128
 
