@@ -139,7 +139,7 @@ def matrix_transpose(a: Matrix) -> Matrix:
 
 
 @lru_cache
-def get_basis_elems() -> List[galois.FieldArray]:
+def get_basis_elems() -> galois.FieldArray:
     elems: List[galois.FieldArray] = []
     a = field.primitive_element
     x = 1
@@ -147,17 +147,24 @@ def get_basis_elems() -> List[galois.FieldArray]:
         elems.append(x)
         x = x * a
 
-    return elems
+    return field(elems)
 
 
 def gf2_scalar_matrix(c: FieldElement) -> Matrix:
-    rows: List[np.ndarray] = []
     c_elem = field(c)
-    basis_els = get_basis_elems()
+    transform = GF2.Zeros((128, 128))
+    basis_els = c_elem * get_basis_elems()
+    one = GF2(1)  # Somehow this is a performance saving
     for i in range(0, 128):
-        rows.insert(0, (c_elem * basis_els[i]).vector())
+        result = int(basis_els[127 - i])
+        mask = 1
+        j = 0
+        for j in range(0, 128):
+            if result & mask:
+                transform[i, 127 - j] = one
+            mask <<= 1
 
-    return GF2(np.vstack(rows).transpose())
+    return transform.transpose()
 
 
 def vec_to_matrix(v: Vec) -> Matrix:
