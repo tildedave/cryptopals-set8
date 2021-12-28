@@ -85,31 +85,28 @@ def polynomial_string(p: FieldPolynomial):
     return ' + '.join(parts)
 
 
-def element_mult(a: FieldElement,
-                 b: FieldElement,
-                 mod: Optional[FieldElement] = None,
+TOP_MASK = 1 << 127
+MASK_32 = (1 << 128) - 1
+
+
+def element_mult(x: FieldElement,
+                 y: FieldElement,
                  ) -> FieldElement:
-    p = 0
-    mod_degree = None
-    if mod is not None:
-        mod_degree = mod.bit_length() - 1
-    b_degree = b.bit_length() - 1
+    r = 0x87
+    z = 0
+    v = x
+    mask = 1
 
-    while a > 0:
-        if a & 1:
-            p ^= b
-        a >>= 1
-        b <<= 1
-        b_degree += 1
+    for _ in range(0, 128):
+        if y & mask:
+            z ^= v
+        if TOP_MASK & v == 0:
+            v = (v << 1)
+        else:
+            v = ((v << 1) ^ r) & MASK_32
+        mask <<= 1
 
-        if mod is not None and b_degree == mod_degree:
-            b ^= mod
-            b_degree = b.bit_length() - 1
-
-    if mod is not None and p > mod:
-        return element_divmod(p, mod)[1]
-
-    return p
+    return z
 
 
 def polynomial_trim(a: FieldPolynomial):
@@ -136,7 +133,7 @@ def polynomial_mult(a: FieldPolynomial,
         for i in range(0, n + 1):
             j = n - i
             if i <= d1 and j <= d2:
-                p[n] = element_add(p[n], element_mult(a[i], b[j], GCM_MODULUS))
+                p[n] = element_add(p[n], element_mult(a[i], b[j]))
 
     if mod is None:
         return polynomial_trim(p)
@@ -167,7 +164,7 @@ polynomial_subtract = polynomial_add
 def polynomial_scalar_mult(a: FieldPolynomial,
                            x: FieldElement,
                            mod: Optional[FieldElement] = None):
-    return polynomial_trim([element_mult(x, y, mod) for y in a])
+    return polynomial_trim([element_mult(x, y) for y in a])
 
 
 def polynomial_divmod(a: FieldPolynomial,
@@ -191,14 +188,14 @@ def polynomial_divmod(a: FieldPolynomial,
         return ZeroPolynomial, r
 
     out = copy(a)
-    inv = element_inverse(b[-1], GCM_MODULUS)
+    inv = element_inverse(b[-1])
 
     for i in range(len(a) - 1, len(b) - 2, -1):
-        out[i] = element_mult(out[i], inv, GCM_MODULUS)
+        out[i] = element_mult(out[i], inv)
         x = out[i]
         for j in range(len(b) - 2, -1, -1):
             term = i - (len(b) - 1 - j)
-            y = element_mult(x, b[j], GCM_MODULUS)
+            y = element_mult(x, b[j])
             out[term] = element_subtract(out[term], y)
 
     return polynomial_trim(out[len(b) - 1:]), polynomial_trim(out[:len(b) - 1])
@@ -236,7 +233,7 @@ def polynomial_make_monic(a: FieldPolynomial):
     if a == ZeroPolynomial:
         return a
 
-    inv = element_inverse(a[-1], GCM_MODULUS)
+    inv = element_inverse(a[-1])
     return polynomial_trim(polynomial_scalar_mult(a, inv, GCM_MODULUS))
 
 
@@ -473,16 +470,16 @@ def element_egcd(a: FieldElement,
     else:
         q, r = element_divmod(b, a)
         # so now q * b + r == a
-        assert element_add(element_mult(q, a), r) == b
+        if b != GCM_MODULUS:
+            assert element_add(element_mult(q, a), r) == b
 
         g, x, y = element_egcd(r, a)
         return (g, element_subtract(y, element_mult(q, x)), x)
 
 
 def element_inverse(a: FieldElement,
-                    m: FieldElement,
                     ) -> FieldElement:
-    g, x, _ = element_egcd(a, m)
+    g, x, _ = element_egcd(a, GCM_MODULUS)
     if g != 1:
         raise ValueError(f'{element_string(a)} was not invertible')
 
@@ -492,12 +489,12 @@ def element_inverse(a: FieldElement,
 
 def element_exp(a: FieldElement,
                 n: int,
-                m: Optional[FieldElement] = None):
+                ):
     p = 1
     while n > 0:
         if n % 2 == 1:
-            p = element_mult(p, a, m)
-        a = element_mult(a, a, m)
+            p = element_mult(p, a)
+        a = element_mult(a, a)
         n = n // 2
 
     return p
@@ -505,8 +502,9 @@ def element_exp(a: FieldElement,
 
 def test_element_mult():
     # (x^2 + x + 1) * (x + 1) == x^3 + 1
-    assert element_mult(7, 3, 2**16) == 9
-    assert element_mult(7, 3, 8) == 1
+    assert element_mult(7, 3) == 9
+    assert element_mult(1 << 125, 1 << 3) == 0x87
+    # assert element_mult(7, 3) == 1
 
 
 def test_element_degree():
@@ -542,16 +540,14 @@ def test_element_inverse():
     mod = 2**4 + 2**1 + 2**0
 
     p = 2**3 + 1
-    inv = element_inverse(p, mod)
-    assert element_mult(p, inv, mod) == 1
-    assert element_inverse(1, mod) == 1
+    inv = element_inverse(p)
+    assert element_mult(p, inv) == 1
+    assert element_inverse(1) == 1
 
 
 def test_element_exp():
     p = 2**3 + 1
-    mod = 2**6 + 2**1 + 1
-    # Sage - ((x^3 + 1)^3) % (x^6 + x + 1)
-    assert element_exp(p, 3, mod) == 2**4 + 2**1
+    assert element_exp(p, 3) == 2**9 + 2**6 + 2**3 + 1
     assert element_exp(p, 0) == 1
 
 
@@ -657,7 +653,7 @@ def gcm_mac_compute_g(total_bytes: bytes, aes_key: str):
         block = get_nth_block(total_bytes, block_num)
         b: FieldElement = int_from_bytes(block)
         g = element_add(g, b)
-        g = element_mult(g, h, GCM_MODULUS)
+        g = element_mult(g, h)
         block_num += 1
 
     return g
