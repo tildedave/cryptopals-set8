@@ -150,21 +150,22 @@ def get_basis_elems() -> galois.FieldArray:
     return field(elems)
 
 
-def gf2_scalar_matrix(c: FieldElement) -> Matrix:
+def gf2_scalar_matrix(c: FieldElement) -> galois.FieldArray:
     c_elem = field(c)
-    transform = GF2.Zeros((128, 128))
+    # It ends up being much faster to create this trasnform in numpy and then
+    # bless it into GF2 afterwards
+    transform = np.zeros((128, 128), dtype=int)
     basis_els = c_elem * get_basis_elems()
-    one = GF2(1)  # Somehow this is a performance saving
     for i in range(0, 128):
         result = int(basis_els[127 - i])
         mask = 1
         j = 0
         for j in range(0, 128):
             if result & mask:
-                transform[i, 127 - j] = one
+                transform[127 - j][i] = 1
             mask <<= 1
 
-    return transform.transpose()
+    return GF2(transform)
 
 
 def vec_to_matrix(v: Vec) -> Matrix:
