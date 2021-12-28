@@ -92,8 +92,8 @@ def element_mult(a: FieldElement,
     p = 0
     mod_degree = None
     if mod is not None:
-        mod_degree = element_degree(mod)
-    b_degree = element_degree(b)
+        mod_degree = mod.bit_length() - 1
+    b_degree = b.bit_length() - 1
 
     while a > 0:
         if a & 1:
@@ -104,7 +104,7 @@ def element_mult(a: FieldElement,
 
         if mod is not None and b_degree == mod_degree:
             b ^= mod
-            b_degree = element_degree(b)
+            b_degree = b.bit_length() - 1
 
     if mod is not None and p > mod:
         return element_divmod(p, mod)[1]

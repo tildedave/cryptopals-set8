@@ -16,6 +16,7 @@ from problem63 import (
     aes_encrypt,
     element_add,
     element_mult,
+    gcm_decrypt,
     gcm_encrypt,
     gcm_mac,
     gcm_mac_compute_g,
@@ -418,7 +419,7 @@ def test_validate_ad():
 def test_gcm_encrypt_truncated_mac_attack():
     random.seed(0)
 
-    tag_bits = 16
+    tag_bits = 8
     num_blocks = 2 ** (tag_bits // 2 + 1)
     n = int(log2(num_blocks))
     aes_key = ''.join(random.choice(string.ascii_letters) for _ in range(32))
@@ -443,53 +444,85 @@ def test_gcm_encrypt_truncated_mac_attack():
         block = get_nth_block(reversed_total_bytes, block_num)
         coeffs[i] = field(int_from_bytes(block))
 
-    num_rows = (n - 1) * 128
-    num_columns = n * 128
+    x = GF2.Identity(128)
+    k_vecs = []
 
-    # this is the dependency matrix in the problem description
-    t_matrix = GF2.Zeros((num_rows, num_columns))
-
-    for j in range(num_columns):
-        # Create the matrix AD that results from flipping the jth bit of the
-        # ciphertext.
-        block_num = (j // 128) + 1
-        ad_matrix = calculate_ad(n, coeffs, block_num, j % 128)
-        for i in range(num_rows // 128):
-            # Copy row i of ad_matrix into column j of t_matrix
-            t_matrix[(i * 128):(i + 1) * 128, j] = ad_matrix[i, :]
-    print('-----> matrix null space')
-    results = matrix_null_space(t_matrix)
-    assert len(results) == 128
-
-    # all 2^i combinations
-    done = False
     count = 0
-    h = field_from_bytes(aes_encrypt(bytes(128 // 8), aes_key))
+    while True:
+        # Degrees of freedom (# of columns) is always n * 128 since we can
+        # fiddle with any 128 bits in the n blocks.
+        num_columns = n * 128
+        # This is the number of rows we want to zero out multiplied by the
+        # degree of freedom that we have.
+        _, x_columns = x.shape
+        num_rows = min(tag_bits - 1, (((n - 1) * 128) // x_columns)) * x_columns
 
-    print('-----> testing vectors in null space to find forgery')
-    # not certain this is working as described
-    while not done:
-        v = GF2.Zeros(num_columns)
-        vector_list = random.sample(results, random.randint(1, len(results)))
-        for vector in vector_list:
-            v += vector
+        # this is the dependency matrix in the problem description
+        t_matrix = GF2.Zeros((num_rows, num_columns))
 
-        forged_ciphertext = apply_bitflips(reversed_total_bytes, v.vector())
-        forged_text_tag = gcm_mac(reverse_blocks(forged_ciphertext), b'',
-                                  length_block,
-                                  aes_key, nonce.encode(),
-                                  tag_bits=tag_bits)
+        print(f'-----> calculating dependency matrix')
+        for j in range(num_columns):
+            # Create the matrix AD that results from flipping the jth bit of
+            # the ciphertext.
+            block_num = (j // 128) + 1
+            ad_matrix = calculate_ad(n, coeffs, block_num, j % 128)
+            matrix_to_zero = np.matmul(ad_matrix, x)
+            for i in range(num_rows // x_columns):
+                # Copy row i of ad_matrix into column j of t_matrix
+                t_matrix[(i * x_columns):(i + 1) * x_columns, j] = matrix_to_zero[i, :]
 
-        if forged_text_tag == t:
+        print('-----> matrix null space')
+        results = matrix_null_space(t_matrix)
+        # assert len(results) == 128
+
+        # all 2^i combinations
+        # found_forgery = False
+        h = field_from_bytes(aes_encrypt(bytes(128 // 8), aes_key))
+
+        print('-----> testing vectors in null space to find forgery')
+
+        found_forgery = False
+        # not certain this is working as described
+        while not found_forgery:
+            count += 1
+            v = GF2.Zeros(num_columns)
+            num_samples = random.randint(1, len(results))
+            vector_list = random.sample(results, num_samples)
+            for vector in vector_list:
+                v += vector
+
+            forged_ciphertext = apply_bitflips(reversed_total_bytes, v.vector())
+            forged_blocks = reverse_blocks(forged_ciphertext)
+            _, passes_auth = gcm_decrypt(forged_blocks[0:-16],
+                                         b'',
+                                         aes_key, nonce.encode(),
+                                         t,
+                                         tag_bits=tag_bits)
+
+            if not passes_auth:
+                continue
+
+            print(f'Attempt {count} - found forgery')
             ad = calculate_ad2(n, coeffs, v)
-            k = ad[:tag_bits // 2]
+            ad_relevant_part = ad[:tag_bits]
+            non_zero_rows, = np.where(ad_relevant_part.any(axis=1))
+            k_vecs += [ad_relevant_part[i] for i in non_zero_rows]
+            k = GF2(np.vstack(k_vecs))
+
             assert not np.matmul(k, h.vector()).any(), \
                 'h should have been in null space of K'
 
-            done = True
+            k_rank = np.linalg.matrix_rank(k)
 
-        count += 1
-        if count % 1000 == 0:
-            print(count)
-        if count > 2 ** tag_bits:
-            assert False, 'did not find candidate in time'
+            null_vectors = matrix_null_space(k)
+            if k_rank == 127:
+                assert len(null_vectors) == 1
+                recovered_h = null_vectors[0]
+                breakpoint()
+                assert field.Vector(recovered_h) == h, \
+                    'Did not recover correct key'
+                return
+
+            x = GF2(np.vstack(null_vectors).transpose())
+            print(f'Rank of K: {k_rank}, X: {x.shape=}')
+            found_forgery = True
