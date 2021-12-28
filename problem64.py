@@ -284,15 +284,15 @@ def get_gf2_scalar_matrices():
     return matrices
 
 
-def calculate_ad(n,
-                 coeffs: List[FieldElement],
+@lru_cache(maxsize=(128 * (2 ** 17)))
+def calculate_ad(n: int,
                  block_idx: int,
                  bit_flip_position: int,
-                 ) -> Matrix:
+                 ) -> galois.FieldArray:
     matrix_pows = get_matrix_pows(n)
     scalar_matrices = get_gf2_scalar_matrices()
     ad_matrix = GF2.Zeros((128, 128))
-    for i in range(1, len(coeffs)):
+    for i in range(1, n + 1):
         if i != block_idx:
             continue
         ad_factor = np.matmul(scalar_matrices[bit_flip_position],
@@ -302,13 +302,10 @@ def calculate_ad(n,
     return ad_matrix
 
 
-def calculate_ad2(n,
-                  coeffs: List[FieldElement],
-                  flip_vector,
-                  ) -> Matrix:
+def calculate_ad_from_flip_vector(n, flip_vector) -> galois.FieldArray:
     matrix_pows = get_matrix_pows(n)
     ad_matrix = GF2.Zeros((128, 128))
-    for i in range(1, len(coeffs)):
+    for i in range(1, n + 1):
         start = (i - 1) * 128
         flip_int = field.Vector(flip_vector[start: start + 128])
         ad_factor = np.matmul(gf2_scalar_matrix(flip_int),
@@ -424,6 +421,31 @@ def test_validate_ad():
             'AD calculation did not match as expected'
 
 
+def calc_dependency_matrix(num_columns, tag_bits, x, n):
+    # This is the number of rows we want to zero out multiplied by the
+    # degree of freedom that we have.
+    _, x_columns = x.shape
+    num_rows = min(tag_bits - 1, (((n - 1) * 128) // x_columns)) * x_columns
+
+    # This is the number of rows we want to zero out multiplied by the
+    # degree of freedom that we have.
+    _, x_columns = x.shape
+
+    # this is the dependency matrix in the problem description
+    t_matrix = GF2.Zeros((num_rows, num_columns))
+    for j in range(num_columns):
+        # Create the matrix AD that results from flipping the jth bit of
+        # the ciphertext.
+        block_num = (j // 128) + 1
+        ad_matrix = calculate_ad(n, block_num, j % 128)
+        mtz = np.matmul(ad_matrix, x)  # matrix to zero
+        for i in range(num_rows // x_columns):
+            # Copy row i of ad_matrix into column j of t_matrix
+            t_matrix[(i * x_columns):(i + 1) * x_columns, j] = mtz[i, :]
+
+    return t_matrix
+
+
 def test_gcm_encrypt_truncated_mac_attack():
     random.seed(0)
 
@@ -460,24 +482,9 @@ def test_gcm_encrypt_truncated_mac_attack():
         # Degrees of freedom (# of columns) is always n * 128 since we can
         # fiddle with any 128 bits in the n blocks.
         num_columns = n * 128
-        # This is the number of rows we want to zero out multiplied by the
-        # degree of freedom that we have.
-        _, x_columns = x.shape
-        num_rows = min(tag_bits - 1, (((n - 1) * 128) // x_columns)) * x_columns
-
-        # this is the dependency matrix in the problem description
-        t_matrix = GF2.Zeros((num_rows, num_columns))
 
         print(f'-----> calculating dependency matrix')
-        for j in range(num_columns):
-            # Create the matrix AD that results from flipping the jth bit of
-            # the ciphertext.
-            block_num = (j // 128) + 1
-            ad_matrix = calculate_ad(n, coeffs, block_num, j % 128)
-            matrix_to_zero = np.matmul(ad_matrix, x)
-            for i in range(num_rows // x_columns):
-                # Copy row i of ad_matrix into column j of t_matrix
-                t_matrix[(i * x_columns):(i + 1) * x_columns, j] = matrix_to_zero[i, :]
+        t_matrix = calc_dependency_matrix(num_columns, tag_bits, x, n)
 
         print('-----> matrix null space')
         results = matrix_null_space(t_matrix)
@@ -501,17 +508,19 @@ def test_gcm_encrypt_truncated_mac_attack():
 
             forged_ciphertext = apply_bitflips(reversed_total_bytes, v.vector())
             forged_blocks = reverse_blocks(forged_ciphertext)
-            _, passes_auth = gcm_decrypt(forged_blocks[0:-16],
-                                         b'',
-                                         aes_key, nonce.encode(),
-                                         t,
-                                         tag_bits=tag_bits)
+            forged_t = gcm_mac(forged_blocks[0:-16],
+                               b'',
+                               length_block,
+                               aes_key, nonce.encode(),
+                               tag_bits=tag_bits)
 
-            if not passes_auth:
+            if forged_t != t:
+                if tag_bits >= 32:
+                    print(f'Attempt {count} - no forgery')
                 continue
 
             print(f'Attempt {count} - found forgery')
-            ad = calculate_ad2(n, coeffs, v)
+            ad = calculate_ad_from_flip_vector(n, v)
             ad_relevant_part = ad[:tag_bits]
             non_zero_rows, = np.where(ad_relevant_part.any(axis=1))
             k_vecs += [ad_relevant_part[i] for i in non_zero_rows]
@@ -526,7 +535,6 @@ def test_gcm_encrypt_truncated_mac_attack():
             if k_rank == 127:
                 assert len(null_vectors) == 1
                 recovered_h = null_vectors[0]
-                breakpoint()
                 assert field.Vector(recovered_h) == h, \
                     'Did not recover correct key'
                 return
