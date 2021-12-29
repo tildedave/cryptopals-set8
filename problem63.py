@@ -736,7 +736,7 @@ def polynomial_evaluate(poly: FieldPolynomial,
                         ) -> FieldElement:
     v = 0
     for a, i in enumerate(poly):
-        i_coeff = element_mult(a, element_exp(x, i, GCM_MODULUS))
+        i_coeff = element_mult(a, element_exp(x, i))
         v = element_add(v, i_coeff)
 
     return v

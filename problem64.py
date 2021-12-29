@@ -3,7 +3,6 @@ from math import log2
 import galois
 from galois import GF2
 import numpy as np
-from numpy.testing import assert_array_equal
 import os
 import pickle
 import random
@@ -15,6 +14,7 @@ from problem63 import (
     FieldElement,
     aes_encrypt,
     element_add,
+    element_exp,
     element_mult,
     gcm_decrypt,
     gcm_encrypt,
@@ -395,8 +395,7 @@ def test_validate_ad():
 
         block_idx, bit_flip_position = divmod(i, 128)
         block_idx += 1
-        ad = calculate_ad(n, coeffs, block_idx=block_idx,
-                          bit_flip_position=bit_flip_position)
+        ad = calculate_ad(n, block_idx, bit_flip_position)
         matrix_result = np.matmul(ad, field(h).vector())
 
         original_result = gcm_mac_compute_g(total_bytes, aes_key)
@@ -446,10 +445,27 @@ def calc_dependency_matrix(num_columns, tag_bits, x, n):
     return t_matrix
 
 
+def error_polynomial_oracle(h, flip_vector):
+    """
+    Get the error polynomial from the given bitflips.
+
+    This is similar to calculating the MAC for the ciphertext + bitflips,
+    but happens to be much faster.
+    """
+    num_blocks = len(flip_vector) // 128
+    e = 0
+    for i in range(1, num_blocks + 1):
+        block = flip_vector[(i - 1) * 128:i * 128]
+        ci = int(field.Vector(block))
+        e = element_add(e, element_mult(ci, element_exp(int(h), 2 ** i)))
+
+    return e
+
+
 def test_gcm_encrypt_truncated_mac_attack():
     random.seed(0)
 
-    tag_bits = 8
+    tag_bits = 32
     num_blocks = 2 ** (tag_bits // 2 + 1)
     n = int(log2(num_blocks))
     aes_key = ''.join(random.choice(string.ascii_letters) for _ in range(32))
@@ -501,10 +517,17 @@ def test_gcm_encrypt_truncated_mac_attack():
         while not found_forgery:
             count += 1
             v = GF2.Zeros(num_columns)
-            num_samples = random.randint(1, len(results))
-            vector_list = random.sample(results, num_samples)
-            for vector in vector_list:
-                v += vector
+            for vector in results:
+                if bool(random.getrandbits(1)):
+                    v += vector
+
+            err_polynomial = error_polynomial_oracle(h, v)
+
+            if err_polynomial >> (128 - tag_bits):
+                if count % 25 == 0:
+                    print(f'Attempt {count} - no forgery '
+                          f'{err_polynomial:#0{34}x}')
+                continue
 
             forged_ciphertext = apply_bitflips(reversed_total_bytes, v.vector())
             forged_blocks = reverse_blocks(forged_ciphertext)
@@ -513,13 +536,10 @@ def test_gcm_encrypt_truncated_mac_attack():
                                length_block,
                                aes_key, nonce.encode(),
                                tag_bits=tag_bits)
+            assert forged_t == t, 'Error polynomial was not accurate'
 
-            if forged_t != t:
-                if tag_bits >= 32:
-                    print(f'Attempt {count} - no forgery')
-                continue
-
-            print(f'Attempt {count} - found forgery')
+            print(f'Attempt {count} - found forgery '
+                  f'{err_polynomial:#0{34}x}')
             ad = calculate_ad_from_flip_vector(n, v)
             ad_relevant_part = ad[:tag_bits]
             non_zero_rows, = np.where(ad_relevant_part.any(axis=1))
@@ -537,6 +557,7 @@ def test_gcm_encrypt_truncated_mac_attack():
                 recovered_h = null_vectors[0]
                 assert field.Vector(recovered_h) == h, \
                     'Did not recover correct key'
+                print(f'Success!  Recovered key {h}')
                 return
 
             x = GF2(np.vstack(null_vectors).transpose())
