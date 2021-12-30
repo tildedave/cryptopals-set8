@@ -235,14 +235,14 @@ def test_squaring_as_matrix():
 
 def generate_plaintext(num_blocks):
     block_size = 128 // 8
-    ciphertext = ''
+    plaintext = ''
     for _ in range(num_blocks):
         block = ''.join(random.choice(string.ascii_letters)
                         for _ in range(block_size))
         assert len(block.encode()) == block_size
-        ciphertext += block
+        plaintext += block
 
-    return ciphertext
+    return plaintext
 
 
 @lru_cache
@@ -477,12 +477,7 @@ def test_gcm_encrypt_truncated_mac_attack():
     print('-----> run gcm_encryption')
     ciphertext, t = gcm_encrypt(plaintext1, b'', aes_key, nonce.encode(),
                                 tag_bits=tag_bits)
-
-    associated_bitlen = (0).to_bytes(8, byteorder='big')
-    cipher_bitlen = (len(plaintext1) * 8).to_bytes(8, byteorder='big')
-    length_block = associated_bitlen + cipher_bitlen
-    total_bytes = ciphertext + length_block
-    reversed_total_bytes = reverse_blocks(total_bytes)
+    reversed_total_bytes = reverse_blocks(ciphertext)
 
     coeffs: List = [0] * (n + 1)
     for i in range(1, n + 1):
@@ -531,9 +526,8 @@ def test_gcm_encrypt_truncated_mac_attack():
 
             forged_ciphertext = apply_bitflips(reversed_total_bytes, v.vector())
             forged_blocks = reverse_blocks(forged_ciphertext)
-            forged_t = gcm_mac(forged_blocks[0:-16],
+            forged_t = gcm_mac(forged_blocks,
                                b'',
-                               length_block,
                                aes_key, nonce.encode(),
                                tag_bits=tag_bits)
             assert forged_t == t, 'Error polynomial was not accurate'

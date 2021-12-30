@@ -607,11 +607,10 @@ def gcm_encrypt(plaintext: bytes,
 
     assert len(length_block) == bytes_per_block
     # MAC Calculation
-    t = gcm_mac(ciphertext, associated_data, length_block, aes_key, nonce,
+    t = gcm_mac(ciphertext + length_block, associated_data, aes_key, nonce,
                 tag_bits=tag_bits)
 
-    # Must trim ciphertext to original bitlength
-    return ciphertext[0: plaintext_length], t
+    return ciphertext + length_block, t
 
 
 def ctr_aes(plaintext: bytes,
@@ -661,11 +660,10 @@ def gcm_mac_compute_g(total_bytes: bytes, aes_key: str):
 
 def gcm_mac(ciphertext: bytes,
             associated_data: bytes,
-            length_block: bytes,
             aes_key: str,
             nonce: bytes,
             tag_bits: int = 128) -> int:
-    total_bytes = associated_data + ciphertext + length_block
+    total_bytes = associated_data + ciphertext
     g = gcm_mac_compute_g(total_bytes, aes_key)
     # '1' block is length (128 - 96) // 8 = 4
     j0 = bytes(nonce) + (1).to_bytes(4, byteorder='big')
@@ -684,25 +682,29 @@ def gcm_decrypt(ciphertext: bytes,
     assert len(nonce) == 96 // 8, f'Nonce must be {96 // 8} bytes'
 
     bytes_per_block = 128 // 8
-    ciphertext, cipher_length = pad_bytes(ciphertext, 128 // 8)
+    num_blocks, offset = divmod(len(ciphertext), 128 // 8)
+    assert offset == 0, 'Can only decrypt full messages'
 
-    associated_data, associated_length = pad_bytes(associated_data, 128 // 8)
+    length_block = get_nth_block(ciphertext, num_blocks)
+    assert len(length_block) == bytes_per_block
+
+    associated_length = int_from_bytes(length_block[0:bytes_per_block // 2])
+    cipher_length = int_from_bytes(length_block[bytes_per_block // 2:])
+
+    associated_data, padded_associated_length = pad_bytes(associated_data, 128 // 8)
+
     assert len(ciphertext) % bytes_per_block == 0
     assert len(associated_data) % bytes_per_block == 0
+    assert padded_associated_length == associated_length // 8, \
+        'Padded associated data length did not match associated length block'
 
     # CTR Encryption
     plaintext = ctr_aes(ciphertext, cipher_length, aes_key, nonce)
 
-    # Length block
-    associated_bitlen = (associated_length * 8).to_bytes(8, byteorder='big')
-    cipher_bitlen = (cipher_length * 8).to_bytes(8, byteorder='big')
-    length_block = associated_bitlen + cipher_bitlen
-    assert len(length_block) == bytes_per_block
-
-    t0 = gcm_mac(ciphertext, associated_data, length_block, aes_key, nonce,
+    t0 = gcm_mac(ciphertext, associated_data, aes_key, nonce,
                  tag_bits=tag_bits)
 
-    return plaintext[0: cipher_length], t0 == t
+    return plaintext[0: cipher_length // 8], t0 == t
 
 
 def ciphertext_to_field_polynomial(ciphertext: bytes,
@@ -795,7 +797,7 @@ def test_gcm_encryption_attack():
     h = int_from_bytes(aes_encrypt(bytes(128 // 8), aes_key))
 
     candidates = get_auth_key_candidates([
-        (ct, bytes(0), t1),
-        (ct2, bytes(0), t2),
+        (ct[0:-16], bytes(0), t1),
+        (ct2[0:-16], bytes(0), t2),
     ])
     assert h in candidates, 'Should have retrieved authentication key'
